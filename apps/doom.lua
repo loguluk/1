@@ -1,6 +1,6 @@
 -- ===================================================
--- DOOM 3D ENGINE V2.0 FOR COMPUTERCRAFT
--- Features: Multi-Layer ASCII Sprites, AI Patrol, Z-Buffer
+-- DOOM 3D ENGINE V3.0 FOR COMPUTERCRAFT
+-- Touch-First Interface with Multiple Enemies
 -- ===================================================
 
 local display = peripheral.find("monitor") or term
@@ -23,7 +23,15 @@ end
 local function setPixel(x, y, char, fg, bg)
     x, y = math.floor(x), math.floor(y)
     if x >= 1 and x <= w and y >= 1 and y <= h then
-        buffer[y][x] = {char = char or " ", fg = fg or colors.white, bg = bg or colors.black}
+        if type(char) == "string" then
+            for i = 1, string.len(char) do
+                if x + i - 1 <= w then
+                    buffer[y][x + i - 1] = {char = string.sub(char, i, i), fg = fg or colors.white, bg = bg or colors.black}
+                end
+            end
+        else
+            buffer[y][x] = {char = char or " ", fg = fg or colors.white, bg = bg or colors.black}
+        end
     end
 end
 
@@ -89,14 +97,31 @@ local wallColors = {
 }
 
 local player = {x = 2.5, y = 2.5, angle = 0, health = 100, ammo = 50, score = 0}
+
+-- Increased to 8 enemies with different health values and colors
 local enemies = {
-    {x = 6.5, y = 3.5, health = 30, alive = true, dir = 1},
-    {x = 9.5, y = 8.5, health = 30, alive = true, dir = -1},
-    {x = 3.5, y = 9.5, health = 30, alive = true, dir = 1}
+    {x = 6.5, y = 3.5, health = 20, maxHealth = 20, alive = true, dir = 1, color = colors.red},
+    {x = 9.5, y = 8.5, health = 25, maxHealth = 25, alive = true, dir = -1, color = colors.red},
+    {x = 3.5, y = 9.5, health = 30, maxHealth = 30, alive = true, dir = 1, color = colors.orange},
+    {x = 8.5, y = 2.5, health = 15, maxHealth = 15, alive = true, dir = 1, color = colors.red},
+    {x = 2.5, y = 6.5, health = 25, maxHealth = 25, alive = true, dir = -1, color = colors.orange},
+    {x = 10.5, y = 5.5, health = 20, maxHealth = 20, alive = true, dir = 1, color = colors.red},
+    {x = 5.5, y = 11.5, health = 30, maxHealth = 30, alive = true, dir = -1, color = colors.orange},
+    {x = 11.5, y = 10.5, health = 25, maxHealth = 25, alive = true, dir = 1, color = colors.red}
 }
 
 local isShooting = false
 local running = true
+
+-- Touch button positions
+local buttons = {
+    turnLeft = {x1 = 2, x2 = 10, y = h - 1, label = "[< LEFT]"},
+    forward = {x1 = 12, x2 = 18, y = h - 1, label = "[FWD]"},
+    back = {x1 = 20, x2 = 26, y = h - 1, label = "[BACK]"},
+    turnRight = {x1 = 28, x2 = 36, y = h - 1, label = "[RIGHT >]"},
+    fire = {x1 = 38, x2 = 46, y = h - 1, label = "[ FIRE! ]"},
+    exit = {x1 = w - 7, x2 = w, y = h, label = "[ EXIT ]"}
+}
 
 local function updateAI()
     for _, e in ipairs(enemies) do
@@ -187,7 +212,7 @@ local function render3D()
 
                             if drawX >= 1 and drawX <= w and drawY >= 1 and drawY <= renderH then
                                 if spriteDist < (zBuffer[drawX] or 16) then
-                                    setPixel(drawX, drawY, char, Sprites.monster.fg, Sprites.monster.bg)
+                                    setPixel(drawX, drawY, char, e.color, colors.red)
                                 end
                             end
                         end
@@ -228,17 +253,23 @@ local function render3D()
     setPixel(w - mapWidth + math.floor(player.x), math.floor(player.y), "P", colors.yellow, colors.black)
 
     for x = 1, w do
-        for y = renderH + 1, h do
+        for y = renderH + 1, h - 2 do
             setPixel(x, y, " ", colors.white, colors.gray)
         end
     end
 
-    setPixel(1, h - 3, "HP: " .. player.health .. "% | AMMO: " .. player.ammo .. " | SCORE: " .. player.score, colors.yellow, colors.gray)
-    setPixel(2, h - 1, "[< TURN]", colors.white, colors.blue)
-    setPixel(11, h - 1, "[FWD]", colors.white, colors.green)
-    setPixel(17, h - 1, "[BACK]", colors.white, colors.green)
-    setPixel(24, h - 1, "[TURN >]", colors.white, colors.blue)
-    setPixel(33, h - 1, "[ FIRE! ]", colors.white, colors.red)
+    local statsText = "HP:" .. player.health .. "% | AMMO:" .. player.ammo .. " | SCORE:" .. player.score
+    setPixel(2, renderH + 2, statsText, colors.yellow, colors.gray)
+
+    -- Draw buttons
+    setPixel(buttons.turnLeft.x1, buttons.turnLeft.y, buttons.turnLeft.label, colors.white, colors.blue)
+    setPixel(buttons.forward.x1, buttons.forward.y, buttons.forward.label, colors.white, colors.green)
+    setPixel(buttons.back.x1, buttons.back.y, buttons.back.label, colors.white, colors.green)
+    setPixel(buttons.turnRight.x1, buttons.turnRight.y, buttons.turnRight.label, colors.white, colors.blue)
+    setPixel(buttons.fire.x1, buttons.fire.y, buttons.fire.label, colors.white, colors.red)
+
+    -- Exit button
+    setPixel(buttons.exit.x1, buttons.exit.y, buttons.exit.label, colors.white, colors.purple)
 
     renderBuffer()
 end
@@ -295,13 +326,29 @@ while running do
 
     if event == "monitor_touch" or event == "mouse_click" then
         local x, y = p2, p3
-        if y >= h - 2 then
-            if x >= 2 and x <= 9 then player.angle = player.angle - 0.25
-            elseif x >= 11 and x <= 15 then movePlayer(1)
-            elseif x >= 17 and x <= 22 then movePlayer(-1)
-            elseif x >= 24 and x <= 31 then player.angle = player.angle + 0.25
-            elseif x >= 33 and x <= 41 then fireWeapon() end
-            render3D()
+        
+        -- Check touch buttons
+        if y == buttons.turnLeft.y then
+            if x >= buttons.turnLeft.x1 and x <= buttons.turnLeft.x2 then
+                player.angle = player.angle - 0.25
+            elseif x >= buttons.forward.x1 and x <= buttons.forward.x2 then
+                movePlayer(1)
+            elseif x >= buttons.back.x1 and x <= buttons.back.x2 then
+                movePlayer(-1)
+            elseif x >= buttons.turnRight.x1 and x <= buttons.turnRight.x2 then
+                player.angle = player.angle + 0.25
+            elseif x >= buttons.fire.x1 and x <= buttons.fire.x2 then
+                fireWeapon()
+            end
+        elseif y == buttons.exit.y then
+            if x >= buttons.exit.x1 and x <= buttons.exit.x2 then
+                running = false
+            end
         end
+        
+        render3D()
     end
 end
+
+display.setBackgroundColor(colors.black)
+display.clear()

@@ -1,5 +1,6 @@
 -- ===================================================
 -- TOUCH GRAPHICS PAINT FOR COMPUTERCRAFT
+-- Enhanced Touch-First Interface
 -- ===================================================
 
 local display = peripheral.find("monitor") or term
@@ -11,6 +12,8 @@ local palette = {
     colors.black, colors.white, colors.red, colors.green,
     colors.blue, colors.yellow, colors.orange, colors.cyan
 }
+
+local paletteNames = {"BLK", "WHT", "RED", "GRN", "BLU", "YEL", "ORG", "CYN"}
 
 local function drawPalette()
     display.setBackgroundColor(colors.gray)
@@ -25,13 +28,21 @@ local function drawPalette()
     
     display.setBackgroundColor(colors.red)
     display.setTextColor(colors.white)
-    display.setCursorPos(w - 5, h)
-    display.write("[EXIT]")
+    display.setCursorPos(w - 7, h)
+    display.write("[ EXIT ]")
 end
 
 display.setBackgroundColor(colors.black)
 display.clear()
 drawPalette()
+
+-- Calculate palette button positions more accurately
+local colorButtonPositions = {}
+for i = 1, #palette do
+    colorButtonPositions[i] = {x1 = 8 + (i - 1) * 2, x2 = 8 + (i - 1) * 2 + 1}
+end
+
+local exitBtn = {x1 = w - 7, x2 = w, y = h}
 
 local drawing = true
 while drawing do
@@ -39,12 +50,15 @@ while drawing do
 
     if event == "monitor_touch" or event == "mouse_click" or event == "mouse_drag" then
         if y == h then
-            if x >= w - 5 then
+            if x >= exitBtn.x1 and x <= exitBtn.x2 then
                 drawing = false
             else
-                local colIdx = math.floor((x - 8) / 2) + 1
-                if palette[colIdx] then
-                    currentColor = palette[colIdx]
+                -- Check which color was clicked
+                for i, btn in ipairs(colorButtonPositions) do
+                    if x >= btn.x1 and x <= btn.x2 then
+                        currentColor = palette[i]
+                        break
+                    end
                 end
             end
         else
@@ -56,3 +70,6 @@ while drawing do
         drawing = false
     end
 end
+
+display.setBackgroundColor(colors.black)
+display.clear()
