@@ -63,11 +63,17 @@ local Sprites = {
         }
     },
     monster = {
-        lines = {
+        frame1 = {
             " /\\__/\\ ",
             "( o.o ) ",
             " > ^ <  ",
             " /| |\\  "
+        },
+        frame2 = {
+            " /\\__/\\ ",
+            "( o.o ) ",
+            " > ^ <  ",
+            " |  | | "
         },
         fg = colors.white,
         bg = colors.red
@@ -112,14 +118,20 @@ local enemies = {
 
 local isShooting = false
 local running = true
+local spawnTimer = os.startTimer(5)
+local monsterAnimationFrame = 1
+local animationTimer = os.startTimer(0.3)
 
--- Touch button positions
+-- Touch button positions - dynamically centered
+local buttonLabels = {"[< LEFT]", "[FWD]", "[BACK]", "[RIGHT >]", "[ FIRE! ]"}
+local totalWidth = 35
+local startX = math.floor((w - totalWidth) / 2)
 local buttons = {
-    turnLeft = {x1 = 2, x2 = 10, y = h - 1, label = "[< LEFT]"},
-    forward = {x1 = 12, x2 = 18, y = h - 1, label = "[FWD]"},
-    back = {x1 = 20, x2 = 26, y = h - 1, label = "[BACK]"},
-    turnRight = {x1 = 28, x2 = 36, y = h - 1, label = "[RIGHT >]"},
-    fire = {x1 = 38, x2 = 46, y = h - 1, label = "[ FIRE! ]"},
+    turnLeft = {x1 = startX, x2 = startX + 7, y = h - 1, label = "[< LEFT]"},
+    forward = {x1 = startX + 8, x2 = startX + 13, y = h - 1, label = "[FWD]"},
+    back = {x1 = startX + 14, x2 = startX + 19, y = h - 1, label = "[BACK]"},
+    turnRight = {x1 = startX + 20, x2 = startX + 28, y = h - 1, label = "[RIGHT >]"},
+    fire = {x1 = startX + 29, x2 = startX + 37, y = h - 1, label = "[ FIRE! ]"},
     exit = {x1 = w - 7, x2 = w, y = h, label = "[ EXIT ]"}
 }
 
@@ -130,6 +142,22 @@ local function updateAI()
             if map[math.floor(e.y)][math.floor(e.x)] > 0 then
                 e.dir = e.dir * -1
             end
+        end
+    end
+end
+
+local function respawnEnemies()
+    local spawnPoints = {
+        {x = 6.5, y = 3.5}, {x = 9.5, y = 8.5}, {x = 3.5, y = 9.5},
+        {x = 8.5, y = 2.5}, {x = 2.5, y = 6.5}
+    }
+    for i = 1, #enemies do
+        if not enemies[i].alive then
+            local spawnPos = spawnPoints[math.random(1, #spawnPoints)]
+            enemies[i].x = spawnPos.x
+            enemies[i].y = spawnPos.y
+            enemies[i].health = enemies[i].maxHealth
+            enemies[i].alive = true
         end
     end
 end
@@ -195,7 +223,8 @@ local function render3D()
 
             if math.abs(spriteAngle) < halfFov then
                 local screenX = math.floor((w / 2) + (spriteAngle / fov) * w)
-                local spriteLines = Sprites.monster.lines
+                local monsterFrame = monsterAnimationFrame == 1 and Sprites.monster.frame1 or Sprites.monster.frame2
+                local spriteLines = monsterFrame
                 local spriteH = #spriteLines
                 local spriteW = string.len(spriteLines[1])
 
@@ -311,6 +340,15 @@ render3D()
 
 while running do
     local event, p1, p2, p3 = os.pullEvent()
+
+    if event == "timer" and p1 == spawnTimer then
+        respawnEnemies()
+        spawnTimer = os.startTimer(5)
+    end
+    if event == "timer" and p1 == animationTimer then
+        monsterAnimationFrame = monsterAnimationFrame == 1 and 2 or 1
+        animationTimer = os.startTimer(0.3)
+    end
 
     updateAI()
 

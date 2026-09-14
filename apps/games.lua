@@ -8,8 +8,14 @@ if display.setTextScale then display.setTextScale(0.5) end
 local w, h = display.getSize()
 
 local function runSnake()
-    local snake = {{x = 5, y = 5}, {x = 4, y = 5}, {x = 3, y = 5}}
-    local food = {x = 12, y = 8}
+    -- Game area dimensions and centering
+    local gameWidth = 20
+    local gameHeight = 10
+    local startX = math.floor((w - gameWidth) / 2)
+    local startY = 3
+    
+    local snake = {{x = startX + 5, y = startY + 5}, {x = startX + 4, y = startY + 5}, {x = startX + 3, y = startY + 5}}
+    local food = {x = startX + 12, y = startY + 3}
     local dir = "RIGHT"
     local nextDir = "RIGHT"
     local score = 0
@@ -17,11 +23,11 @@ local function runSnake()
 
     local timer = os.startTimer(0.1)
     
-    -- Touch button positions for Snake
-    local upBtn = {x1 = w/2 - 2, x2 = w/2 + 2, y = 3}
-    local leftBtn = {x1 = w/2 - 6, x2 = w/2 - 3, y = 5}
-    local downBtn = {x1 = w/2 - 2, x2 = w/2 + 2, y = 7}
-    local rightBtn = {x1 = w/2 + 3, x2 = w/2 + 6, y = 5}
+    -- Touch button positions for Snake (centered)
+    local upBtn = {x1 = math.floor(w/2) - 2, x2 = math.floor(w/2) + 2, y = startY - 1}
+    local leftBtn = {x1 = math.floor(w/2) - 6, x2 = math.floor(w/2) - 3, y = startY + 1}
+    local downBtn = {x1 = math.floor(w/2) - 2, x2 = math.floor(w/2) + 2, y = startY + 3}
+    local rightBtn = {x1 = math.floor(w/2) + 3, x2 = math.floor(w/2) + 6, y = startY + 1}
     local exitBtn = {x1 = w - 7, x2 = w, y = h}
 
     local function drawGame()
@@ -151,6 +157,7 @@ end
 
 local function runTetris()
     local gridW, gridH = 10, 15
+    local gridStartX = math.floor((w - gridW - 2) / 2)  -- Center the grid with borders
     local grid = {}
     for y = 1, gridH do
         grid[y] = {}
@@ -178,6 +185,18 @@ local function runTetris()
     local score = 0
     local gameOver = false
     local timer = os.startTimer(0.5)
+    
+    -- Touch button positions for Tetris (bottom row)
+    local btnWidth = 8
+    local totalBtnWidth = btnWidth * 5 + 4  -- 5 buttons + spacing
+    local btnStartX = math.floor((w - totalBtnWidth) / 2)
+    local tetrisButtons = {
+        rotate = {x1 = btnStartX, x2 = btnStartX + btnWidth - 1, y = h - 1, label = "[ROT]"},
+        left = {x1 = btnStartX + btnWidth + 1, x2 = btnStartX + btnWidth * 2, y = h - 1, label = "[LEFT]"},
+        right = {x1 = btnStartX + btnWidth * 2 + 2, x2 = btnStartX + btnWidth * 3 + 1, y = h - 1, label = "[RIGHT]"},
+        drop = {x1 = btnStartX + btnWidth * 3 + 3, x2 = btnStartX + btnWidth * 4 + 2, y = h - 1, label = "[DROP]"},
+        exit = {x1 = w - 7, x2 = w, y = h, label = "[EXIT]"}
+    }
 
     local function canPlace(px, py, piece)
         for y, row in ipairs(piece) do
@@ -238,7 +257,7 @@ local function runTetris()
         display.setCursorPos(2, 1)
         display.write("TETRIS | Score: " .. score)
 
-        local startX = 2
+        local startX = gridStartX
         for y = 1, gridH do
             display.setCursorPos(startX, y + 1)
             display.setTextColor(colors.white)
@@ -255,6 +274,28 @@ local function runTetris()
             display.setTextColor(colors.white)
             display.write("|")
         end
+        
+        -- Draw touch buttons
+        display.setBackgroundColor(colors.blue)
+        display.setTextColor(colors.white)
+        display.setCursorPos(tetrisButtons.rotate.x1, tetrisButtons.rotate.y)
+        display.write(tetrisButtons.rotate.label)
+        
+        display.setBackgroundColor(colors.green)
+        display.setCursorPos(tetrisButtons.left.x1, tetrisButtons.left.y)
+        display.write(tetrisButtons.left.label)
+        
+        display.setBackgroundColor(colors.green)
+        display.setCursorPos(tetrisButtons.right.x1, tetrisButtons.right.y)
+        display.write(tetrisButtons.right.label)
+        
+        display.setBackgroundColor(colors.orange)
+        display.setCursorPos(tetrisButtons.drop.x1, tetrisButtons.drop.y)
+        display.write(tetrisButtons.drop.label)
+        
+        display.setBackgroundColor(colors.red)
+        display.setCursorPos(tetrisButtons.exit.x1, tetrisButtons.exit.y)
+        display.write(tetrisButtons.exit.label)
     end
 
     while not gameOver do
@@ -286,6 +327,30 @@ local function runTetris()
                 end
             elseif p1 == keys.q then
                 gameOver = true
+            end
+            drawGame()
+        elseif event == "monitor_touch" or event == "mouse_click" then
+            local x, y = p2, p3
+            if y == tetrisButtons.rotate.y then
+                if x >= tetrisButtons.rotate.x1 and x <= tetrisButtons.rotate.x2 then
+                    -- Add rotation logic here if needed
+                elseif x >= tetrisButtons.left.x1 and x <= tetrisButtons.left.x2 then
+                    if canPlace(posX - 1, posY, currentPiece) then
+                        posX = posX - 1
+                    end
+                elseif x >= tetrisButtons.right.x1 and x <= tetrisButtons.right.x2 then
+                    if canPlace(posX + 1, posY, currentPiece) then
+                        posX = posX + 1
+                    end
+                elseif x >= tetrisButtons.drop.x1 and x <= tetrisButtons.drop.x2 then
+                    while canPlace(posX, posY + 1, currentPiece) do
+                        posY = posY + 1
+                    end
+                end
+            elseif y == tetrisButtons.exit.y then
+                if x >= tetrisButtons.exit.x1 and x <= tetrisButtons.exit.x2 then
+                    gameOver = true
+                end
             end
             drawGame()
         end

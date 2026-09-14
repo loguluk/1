@@ -23,7 +23,7 @@ local function drawPalette()
     
     for i, col in ipairs(palette) do
         display.setBackgroundColor(col)
-        display.write("  ")
+        display.write(" ")
     end
     
     display.setBackgroundColor(colors.red)
@@ -39,7 +39,7 @@ drawPalette()
 -- Calculate palette button positions more accurately
 local colorButtonPositions = {}
 for i = 1, #palette do
-    colorButtonPositions[i] = {x1 = 8 + (i - 1) * 2, x2 = 8 + (i - 1) * 2 + 1}
+    colorButtonPositions[i] = {x1 = 8 + (i - 1), x2 = 8 + (i - 1)}
 end
 
 local exitBtn = {x1 = w - 7, x2 = w, y = h}
