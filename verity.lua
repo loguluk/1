@@ -1,11 +1,10 @@
-local API_KEY = "YOUR_OPENROUTER_API_KEY"
+local API_KEY = "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"
 local API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 local display = term.current()
 display.clear()
 local w, h = display.getSize()
 
--- System prompt and conversation history in English (with Latinized typos)
 local history = {
     { 
         role = "system", 
@@ -13,7 +12,6 @@ local history = {
     }
 }
 
--- Screen glitch effect
 local function triggerScreenGlitch()
     if math.random(1, 3) == 1 then
         local rx = math.random(1, math.max(1, w - 4))
@@ -32,7 +30,6 @@ local function triggerScreenGlitch()
     end
 end
 
--- Header UI
 local function drawOSHeader()
     local cx, cy = display.getCursorPos()
     display.setCursorPos(1, 1)
@@ -76,14 +73,16 @@ while true do
         triggerScreenGlitch()
 
         local requestData = textutils.serializeJSON({
-            model = "openrouter/free",
+            model = "google/gemma-2-9b-it:free",
             messages = history,
             stream = false
         })
 
         local headers = {
             ["Content-Type"] = "application/json",
-            ["Authorization"] = "Bearer " .. API_KEY
+            ["Authorization"] = "Bearer " .. API_KEY,
+            ["HTTP-Referer"] = "https://github.com/loguluk/1",
+            ["X-Title"] = "ComputerCraft Verity"
         }
 
         local response = http.post(API_URL, requestData, headers)
