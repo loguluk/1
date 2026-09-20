@@ -1,12 +1,10 @@
--- Ваш API-ключ OpenRouter
-local API_KEY = "sk-or-v1-ecd...8d9" -- вставьте полный ключ
+local API_KEY = "ВАШ_КЛЮЧ_ОТ_OPENROUTER"
 local API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 local display = term.current()
 display.clear()
 local w, h = display.getSize()
 
--- История диалога и системный промпт Верити
 local history = {
     { 
         role = "system", 
@@ -14,7 +12,6 @@ local history = {
     }
 }
 
--- Эффект графических сбоев на мониторе
 local function triggerScreenGlitch()
     if math.random(1, 3) == 1 then
         local rx = math.random(1, math.max(1, w - 4))
@@ -33,7 +30,6 @@ local function triggerScreenGlitch()
     end
 end
 
--- Отрисовка шапки
 local function drawOSHeader()
     local cx, cy = display.getCursorPos()
     display.setCursorPos(1, 1)
@@ -75,9 +71,8 @@ while true do
         print("Верити думати...")
         triggerScreenGlitch()
 
-        -- Запрос к OpenRouter с бесплатной маршрутизацией
         local requestData = textutils.serializeJSON({
-            model = "openrouter/free", -- Авто-выбор бесплатной доступной модели
+            model = "openrouter/free",
             messages = history,
             stream = false
         })
