@@ -1,17 +1,12 @@
-local API_KEY = "YOUR_DEEPSEEK_API_KEY"
-local API_URL = "https://api.deepseek.com/chat/completions"
+-- Ваш API-ключ OpenRouter
+local API_KEY = "sk-or-v1-ecd...8d9" -- вставьте полный ключ
+local API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-if API_KEY == "YOUR_DEEPSEEK_API_KEY" then
-    error("Укажите ваш API_KEY на первой строчке кода!")
-end
-
--- Включаем работу с экраном компьютера
 local display = term.current()
 display.clear()
-
 local w, h = display.getSize()
 
--- Системная инструкция для Верити
+-- История диалога и системный промпт Верити
 local history = {
     { 
         role = "system", 
@@ -19,33 +14,26 @@ local history = {
     }
 }
 
--- Функция создания случайных графических помех (глюков) на мониторе
+-- Эффект графических сбоев на мониторе
 local function triggerScreenGlitch()
-    if math.random(1, 2) == 1 then
-        -- Выбираем случайную точку на мониторе
+    if math.random(1, 3) == 1 then
         local rx = math.random(1, math.max(1, w - 4))
         local ry = math.random(2, math.max(2, h - 1))
-        
-        -- Сохраняем позицию курсора
         local cx, cy = display.getCursorPos()
         
         display.setCursorPos(rx, ry)
         display.setBackgroundColor(colors.red)
         display.setTextColor(colors.yellow)
-        
-        local glitchTexts = { "ERR", "0x0", "???", "#!@", "GLITCH" }
-        display.write(glitchTexts[math.random(1, #glitchTexts)])
-        
+        display.write("ERR#404")
         os.sleep(0.06)
         
-        -- Восстанавливаем цвет и курсор
         display.setBackgroundColor(colors.black)
         display.setTextColor(colors.white)
         display.setCursorPos(cx, cy)
     end
 end
 
--- Функция отрисовки графической шапки интерфейса
+-- Отрисовка шапки
 local function drawOSHeader()
     local cx, cy = display.getCursorPos()
     display.setCursorPos(1, 1)
@@ -57,24 +45,21 @@ local function drawOSHeader()
     display.setCursorPos(cx, cy)
 end
 
--- Старт интерфейса
 display.setBackgroundColor(colors.black)
 display.clear()
 drawOSHeader()
 
 display.setCursorPos(1, 3)
 display.setTextColor(colors.lightGray)
-print("Монитор подключен. Верити готов...")
+print("Подключено к OpenRouter. Верити готов!")
 print("-----------------------------------")
 
 while true do
     triggerScreenGlitch()
 
-    -- Ввод с клавиатуры компьютера
     display.setTextColor(colors.yellow)
     write("\nВы > ")
     display.setTextColor(colors.white)
-    
     local input = read()
 
     if input:lower() == "exit" or input:lower() == "quit" then
@@ -88,12 +73,11 @@ while true do
 
         display.setTextColor(colors.gray)
         print("Верити думати...")
-        
         triggerScreenGlitch()
 
-        -- Запрос к DeepSeek API
+        -- Запрос к OpenRouter с бесплатной маршрутизацией
         local requestData = textutils.serializeJSON({
-            model = "deepseek-chat",
+            model = "openrouter/free", -- Авто-выбор бесплатной доступной модели
             messages = history,
             stream = false
         })
@@ -114,7 +98,6 @@ while true do
                 local aiMessage = data.choices[1].message.content
                 table.insert(history, { role = "assistant", content = aiMessage })
 
-                -- Мигание экрана перед выводом ответа
                 display.setBackgroundColor(colors.blue)
                 os.sleep(0.04)
                 display.setBackgroundColor(colors.black)
@@ -125,11 +108,11 @@ while true do
                 display.setTextColor(colors.white)
             else
                 display.setTextColor(colors.red)
-                print("\n[ОШИБКА]: Верити сбился...")
+                print("\n[ОШИБКА]: Не удалось распарсить ответ API.")
             end
         else
             display.setTextColor(colors.red)
-            print("\n[ОШИБКА]: Нет соединения с API!")
+            print("\n[ОШИБКА]: Ошибка HTTP! Проверьте ключ или конфиг CC.")
         end
     end
 end
