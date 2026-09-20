@@ -1,17 +1,19 @@
-local API_KEY = "ВАШ_КЛЮЧ_ОТ_OPENROUTER"
+local API_KEY = "YOUR_OPENROUTER_API_KEY"
 local API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 local display = term.current()
 display.clear()
 local w, h = display.getSize()
 
+-- System prompt and conversation history in English (with Latinized typos)
 local history = {
     { 
         role = "system", 
-        content = "Тебя зовут Верити. Ты живешь внутри компьютера в Minecraft ComputerCraft. Твоё самое первое сообщение ВСЕГДА должно начинаться со слов 'Привет, я Верити'. Ты немного глуповат, соображаешь медленно, отвечаешь просто и наивно. Делай в тексте небольшие, но понятные орфографические ошибки или опечатки (например, 'превет', 'шо', 'тута', 'щас', 'зачемь', 'компютер'), но так, чтобы смысл ответа оставался понятен. Не пиши слишком умные и длинные фразы." 
+        content = "Your name is Verity. You live inside a Minecraft ComputerCraft computer. Your VERY FIRST response must ALWAYS start with 'Privet, I am Verity'. You are a bit silly, slow-thinking, simple, and naive. Make small, clear typos and misspellings in your replies (for example: 'privet', 'sho', 'wot', 'komputer', 'lok', 'sory'), but keep the meaning understandable. Keep your answers brief and simple." 
     }
 }
 
+-- Screen glitch effect
 local function triggerScreenGlitch()
     if math.random(1, 3) == 1 then
         local rx = math.random(1, math.max(1, w - 4))
@@ -30,6 +32,7 @@ local function triggerScreenGlitch()
     end
 end
 
+-- Header UI
 local function drawOSHeader()
     local cx, cy = display.getCursorPos()
     display.setCursorPos(1, 1)
@@ -47,20 +50,21 @@ drawOSHeader()
 
 display.setCursorPos(1, 3)
 display.setTextColor(colors.lightGray)
-print("Подключено к OpenRouter. Верити готов!")
+print("Connected to OpenRouter. Verity ready!")
+print("Type 'exit' to quit.")
 print("-----------------------------------")
 
 while true do
     triggerScreenGlitch()
 
     display.setTextColor(colors.yellow)
-    write("\nВы > ")
+    write("\nYou > ")
     display.setTextColor(colors.white)
     local input = read()
 
     if input:lower() == "exit" or input:lower() == "quit" then
         display.setTextColor(colors.lightGray)
-        print("Верити выключился...")
+        print("Verity shutting down...")
         break
     end
 
@@ -68,7 +72,7 @@ while true do
         table.insert(history, { role = "user", content = input })
 
         display.setTextColor(colors.gray)
-        print("Верити думати...")
+        print("Verity thinkin...")
         triggerScreenGlitch()
 
         local requestData = textutils.serializeJSON({
@@ -99,15 +103,15 @@ while true do
                 drawOSHeader()
 
                 display.setTextColor(colors.cyan)
-                print("\nВерити: " .. aiMessage)
+                print("\nVerity: " .. aiMessage)
                 display.setTextColor(colors.white)
             else
                 display.setTextColor(colors.red)
-                print("\n[ОШИБКА]: Не удалось распарсить ответ API.")
+                print("\n[ERROR]: Failed to parse API response.")
             end
         else
             display.setTextColor(colors.red)
-            print("\n[ОШИБКА]: Ошибка HTTP! Проверьте ключ или конфиг CC.")
+            print("\n[ERROR]: HTTP Request failed! Check API key or CC config.")
         end
     end
 end
