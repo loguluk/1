@@ -5,59 +5,80 @@ if API_KEY == "YOUR_DEEPSEEK_API_KEY" then
     error("Укажите ваш API_KEY на первой строчке кода!")
 end
 
--- Системная инструкция персонажа
+-- Включаем работу с экраном компьютера
+local display = term.current()
+display.clear()
+
+local w, h = display.getSize()
+
+-- Системная инструкция для Верити
 local history = {
     { 
         role = "system", 
-        content = "Тебя зовут Верити. Ты живешь внутри компьютера в Minecraft. Твоё самое первое сообщение ВСЕГДА должно начинаться со слов 'Привет, я Верити'. Ты немного глуповат, соображаешь медленно, отвечаешь просто и наивно. Делай в тексте небольшие, но понятные орфографические ошибки или опечатки (например, 'превет', 'шо', 'тута', 'щас', 'зачемь', 'компютер'), но так, чтобы смысл ответа оставался понятен. Не пиши слишком умные и длинные фразы." 
+        content = "Тебя зовут Верити. Ты живешь внутри компьютера в Minecraft ComputerCraft. Твоё самое первое сообщение ВСЕГДА должно начинаться со слов 'Привет, я Верити'. Ты немного глуповат, соображаешь медленно, отвечаешь просто и наивно. Делай в тексте небольшие, но понятные орфографические ошибки или опечатки (например, 'превет', 'шо', 'тута', 'щас', 'зачемь', 'компютер'), но так, чтобы смысл ответа оставался понятен. Не пиши слишком умные и длинные фразы." 
     }
 }
 
--- Инициализация экрана
-term.clear()
-local w, h = term.getSize()
-
--- Функция симуляции графического сбоя/глюка ПК
-local function glitchEffect()
-    if math.random(1, 3) == 1 then -- Срабатывает случайным образом
-        local gx = math.random(1, w - 5)
-        local gy = math.random(2, h - 2)
-        term.setCursorPos(gx, gy)
-        term.setBackgroundColor(colors.red)
-        term.setTextColor(colors.yellow)
-        term.write("ERR#404")
-        os.sleep(0.08)
-        term.setBackgroundColor(colors.black)
+-- Функция создания случайных графических помех (глюков) на мониторе
+local function triggerScreenGlitch()
+    if math.random(1, 2) == 1 then
+        -- Выбираем случайную точку на мониторе
+        local rx = math.random(1, math.max(1, w - 4))
+        local ry = math.random(2, math.max(2, h - 1))
+        
+        -- Сохраняем позицию курсора
+        local cx, cy = display.getCursorPos()
+        
+        display.setCursorPos(rx, ry)
+        display.setBackgroundColor(colors.red)
+        display.setTextColor(colors.yellow)
+        
+        local glitchTexts = { "ERR", "0x0", "???", "#!@", "GLITCH" }
+        display.write(glitchTexts[math.random(1, #glitchTexts)])
+        
+        os.sleep(0.06)
+        
+        -- Восстанавливаем цвет и курсор
+        display.setBackgroundColor(colors.black)
+        display.setTextColor(colors.white)
+        display.setCursorPos(cx, cy)
     end
 end
 
 -- Функция отрисовки графической шапки интерфейса
-local function drawHeader()
-    term.setBackgroundColor(colors.gray)
-    term.setTextColor(colors.white)
-    term.setCursorPos(1, 1)
-    term.clearLine()
-    term.write(" [VERITY OS v0.1] - Status: OK? ")
-    term.setBackgroundColor(colors.black)
+local function drawOSHeader()
+    local cx, cy = display.getCursorPos()
+    display.setCursorPos(1, 1)
+    display.setBackgroundColor(colors.gray)
+    display.setTextColor(colors.white)
+    display.clearLine()
+    display.write(" [VERITY OS] Mon: " .. w .. "x" .. h .. " | Status: OK ")
+    display.setBackgroundColor(colors.black)
+    display.setCursorPos(cx, cy)
 end
 
-drawHeader()
-term.setCursorPos(1, 3)
-term.setTextColor(colors.lightGray)
-print("Система запущена. Напишите что-нибудь Верити...")
-print("------------------------------------------------")
+-- Старт интерфейса
+display.setBackgroundColor(colors.black)
+display.clear()
+drawOSHeader()
+
+display.setCursorPos(1, 3)
+display.setTextColor(colors.lightGray)
+print("Монитор подключен. Верити готов...")
+print("-----------------------------------")
 
 while true do
-    glitchEffect()
+    triggerScreenGlitch()
 
-    -- Ввод пользователя
-    term.setTextColor(colors.yellow)
-    term.write("\nВы > ")
-    term.setTextColor(colors.white)
+    -- Ввод с клавиатуры компьютера
+    display.setTextColor(colors.yellow)
+    write("\nВы > ")
+    display.setTextColor(colors.white)
+    
     local input = read()
 
     if input:lower() == "exit" or input:lower() == "quit" then
-        term.setTextColor(colors.lightGray)
+        display.setTextColor(colors.lightGray)
         print("Верити выключился...")
         break
     end
@@ -65,9 +86,10 @@ while true do
     if #input > 0 then
         table.insert(history, { role = "user", content = input })
 
-        term.setTextColor(colors.gray)
-        print("Верити думати... [====  ]")
-        glitchEffect()
+        display.setTextColor(colors.gray)
+        print("Верити думати...")
+        
+        triggerScreenGlitch()
 
         -- Запрос к DeepSeek API
         local requestData = textutils.serializeJSON({
@@ -92,22 +114,22 @@ while true do
                 local aiMessage = data.choices[1].message.content
                 table.insert(history, { role = "assistant", content = aiMessage })
 
-                -- Эффект лёгкого подмигивания экрана перед ответом
-                term.setBackgroundColor(colors.blue)
-                os.sleep(0.05)
-                term.setBackgroundColor(colors.black)
-                drawHeader()
+                -- Мигание экрана перед выводом ответа
+                display.setBackgroundColor(colors.blue)
+                os.sleep(0.04)
+                display.setBackgroundColor(colors.black)
+                drawOSHeader()
 
-                term.setTextColor(colors.cyan)
+                display.setTextColor(colors.cyan)
                 print("\nВерити: " .. aiMessage)
-                term.setTextColor(colors.white)
+                display.setTextColor(colors.white)
             else
-                term.setTextColor(colors.red)
-                print("\n[ОШИБКА]: Верити запутался в ответе...")
+                display.setTextColor(colors.red)
+                print("\n[ОШИБКА]: Верити сбился...")
             end
         else
-            term.setTextColor(colors.red)
-            print("\n[ОШИБКА]: Нет связи с Верити (проверьте интернет или ключ)")
+            display.setTextColor(colors.red)
+            print("\n[ОШИБКА]: Нет соединения с API!")
         end
     end
 end
