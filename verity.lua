@@ -2,7 +2,6 @@ local API_KEY = ""
 local API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 local display = term.current()
-display.clear()
 local w, h = display.getSize()
 
 local history = {
@@ -23,73 +22,84 @@ local function drawOSHeader()
     display.setBackgroundColor(colors.gray)
     display.setTextColor(colors.white)
     display.clearLine()
-    display.write(" [VERITY OS v2.0 - ULTRA EDITION] Mon: " .. w .. "x" .. h .. " ")
+    display.write(" [VERITY OS v2.0 - ULTRA] Mon: " .. w .. "x" .. h .. " ")
     display.setBackgroundColor(colors.black)
     display.setCursorPos(cx, cy)
 end
 
-display.setBackgroundColor(colors.black)
-display.clear()
-drawOSHeader()
+local function sendApiRequest(userInput)
+    table.insert(history, { role = "user", content = userInput })
 
-display.setCursorPos(1, 3)
-display.setTextColor(colors.lightGray)
-print("Verity core activated. Type 'exit' to stop.")
-print("-----------------------------------")
+    local requestData = textutils.serializeJSON({
+        model = "openrouter/free",
+        messages = history,
+        stream = false
+    })
 
-while true do
-    display.setTextColor(colors.yellow)
-    write("\nYou > ")
-    display.setTextColor(colors.white)
-    local input = read()
+    local headers = {
+        ["Content-Type"] = "application/json",
+        ["Authorization"] = "Bearer " .. API_KEY,
+        ["HTTP-Referer"] = "https://github.com/loguluk/1",
+        ["X-Title"] = "ComputerCraft Verity"
+    }
 
-    if input:lower() == "exit" or input:lower() == "quit" then
-        display.setTextColor(colors.lightGray)
-        print("Verity goes to sleep... Poka!")
-        break
-    end
+    -- Используем асинхронный HTTP запрос, чтобы не вешать ПК
+    http.request(API_URL, requestData, headers)
 
-    if #input > 0 then
-        table.insert(history, { role = "user", content = input })
-
-        display.setTextColor(colors.gray)
-        print("Verity thinkin hard...")
-
-        local requestData = textutils.serializeJSON({
-            model = "openrouter/free",
-            messages = history,
-            stream = false
-        })
-
-        local headers = {
-            ["Content-Type"] = "application/json",
-            ["Authorization"] = "Bearer " .. API_KEY,
-            ["HTTP-Referer"] = "https://github.com/loguluk/1",
-            ["X-Title"] = "ComputerCraft Verity"
-        }
-
-        local response = http.post(API_URL, requestData, headers)
-
-        if response then
-            local responseBody = response.readAll()
-            response.close()
-
+    while true do
+        local event, url, handle = os.pullEvent()
+        if event == "http_success" then
+            local responseBody = handle.readAll()
+            handle.close()
             local data = textutils.unserializeJSON(responseBody)
             if data and data.choices and data.choices[1] and data.choices[1].message then
                 local aiMessage = data.choices[1].message.content
                 table.insert(history, { role = "assistant", content = aiMessage })
-
-                drawOSHeader()
-                display.setTextColor(colors.cyan)
-                print("\nVerity: " .. aiMessage)
-                display.setTextColor(colors.white)
-            else
-                display.setTextColor(colors.red)
-                print("\n[ERROR]: Failed to parse response.")
+                return aiMessage
             end
-        else
-            display.setTextColor(colors.red)
-            print("\n[ERROR]: HTTP Request failed.")
+            return "[Verity error]: sho-to slomalos v otvete..."
+        elseif event == "http_failure" then
+            return "[Verity error]: ne mogu podkluchitsa k netu..."
         end
     end
 end
+
+-- Основной цикл программы
+local function main()
+    display.setBackgroundColor(colors.black)
+    display.clear()
+    drawOSHeader()
+
+    display.setCursorPos(1, 3)
+    display.setTextColor(colors.lightGray)
+    print("Verity core loaded. Type 'exit' to stop.")
+    print("-----------------------------------")
+
+    while true do
+        display.setTextColor(colors.yellow)
+        write("\nYou > ")
+        display.setTextColor(colors.white)
+        local input = read()
+
+        if input:lower() == "exit" or input:lower() == "quit" then
+            display.setTextColor(colors.lightGray)
+            print("Verity goes to sleep... Poka!")
+            break
+        end
+
+        if #input > 0 then
+            display.setTextColor(colors.gray)
+            print("Verity thinkin hard...")
+
+            local reply = sendApiRequest(input)
+
+            drawOSHeader()
+            display.setTextColor(colors.cyan)
+            print("\nVerity: " .. reply)
+            display.setTextColor(colors.white)
+        end
+    end
+end
+
+-- Запуск с защитой от зависаний
+pcall(main)
