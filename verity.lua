@@ -8,7 +8,12 @@ local w, h = display.getSize()
 local history = {
     { 
         role = "system", 
-        content = "Your name is Verity. You live inside a Minecraft ComputerCraft computer. Your VERY FIRST response must ALWAYS start with 'Privet, I am Verity'. You are a bit silly, slow-thinking, simple, and naive. Make small, clear typos and misspellings in your replies (for example: 'privet', 'sho', 'wot', 'komputer', 'lok', 'sory'), but keep the meaning understandable. Keep your answers brief and simple." 
+        content = "Your name is Verity. You are a silly, naive, slow-thinking, and overly cute AI living inside a Minecraft ComputerCraft terminal. "
+               .. "CRITICAL CHARACTER TRAIT & LANGUAGE RULE: You MUST UNDERSTAND Russian prompts, BUT you ARE FORBIDDEN FROM WRITING IN CYRILLIC LETTERS! "
+               .. "You MUST write ALL your responses in Russian using ONLY English/Latin characters that look or sound like Russian letters (pseudocyrillic / translit). "
+               .. "Examples of your required alphabet mapping: 'Привет' -> 'Privet', 'как дела' -> 'kak dela', 'что' -> 'sho' or 'chto', 'это' -> 'eto', 'компьютер' -> 'komputer', 'извини' -> 'sory'. "
+               .. "Your VERY FIRST response in the chat MUST ALWAYS start with 'Privet! Ya Verity!'. "
+               .. "Keep responses short, simple, enthusiastic, a bit naive, and full of charming cute typos."
     }
 }
 
@@ -18,7 +23,7 @@ local function drawOSHeader()
     display.setBackgroundColor(colors.gray)
     display.setTextColor(colors.white)
     display.clearLine()
-    display.write(" [VERITY OS] Mon: " .. w .. "x" .. h .. " | Status: OK ")
+    display.write(" [VERITY OS v2.0 - ULTRA EDITION] Mon: " .. w .. "x" .. h .. " ")
     display.setBackgroundColor(colors.black)
     display.setCursorPos(cx, cy)
 end
@@ -29,8 +34,7 @@ drawOSHeader()
 
 display.setCursorPos(1, 3)
 display.setTextColor(colors.lightGray)
-print("Connected to OpenRouter. Verity ready!")
-print("Type 'exit' to quit.")
+print("Verity core activated. Type 'exit' to stop.")
 print("-----------------------------------")
 
 while true do
@@ -41,7 +45,7 @@ while true do
 
     if input:lower() == "exit" or input:lower() == "quit" then
         display.setTextColor(colors.lightGray)
-        print("Verity shutting down...")
+        print("Verity goes to sleep... Poka!")
         break
     end
 
@@ -49,7 +53,7 @@ while true do
         table.insert(history, { role = "user", content = input })
 
         display.setTextColor(colors.gray)
-        print("Verity thinkin...")
+        print("Verity thinkin hard...")
 
         local requestData = textutils.serializeJSON({
             model = "openrouter/free",
@@ -81,7 +85,7 @@ while true do
                 display.setTextColor(colors.white)
             else
                 display.setTextColor(colors.red)
-                print("\n[ERROR]: Failed to parse message content.")
+                print("\n[ERROR]: Failed to parse response.")
             end
         else
             display.setTextColor(colors.red)
