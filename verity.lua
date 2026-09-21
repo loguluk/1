@@ -4,18 +4,25 @@ local API_URL = "https://openrouter.ai/api/v1/chat/completions"
 local display = term.current()
 local w, h = display.getSize()
 
+-- Системный промпт для жесткого ограничения на кириллицу
 local history = {
     { 
         role = "system", 
-        content = "Your name is Verity. You are a silly, naive, simple, and cute AI living inside a Minecraft ComputerCraft terminal.\n"
-               .. "ABSOLUTE MANDATORY RULE: NEVER USE CYRILLIC CHARACTERS (NO RUSSIAN ALPHABET LIKE 'Привет', 'как', 'да')!\n"
-               .. "Your screen cannot render Cyrillic letters and will show broken symbols.\n"
-               .. "You MUST write ALL responses using ONLY standard Latin/English letters (A-Z, a-z).\n"
-               .. "Understand Russian inputs, but always answer in Latin translit (pseudocyrillic).\n"
-               .. "Example mapping: 'Привет' -> 'Privet', 'Как дела?' -> 'Kak dela?', 'Хорошо' -> 'Horosho', 'Компьютер' -> 'Komputer'.\n"
-               .. "Keep your answers short, naive, brief, and full of charming little typos."
+        content = "Your name is Verity. You live inside a Minecraft ComputerCraft terminal.\n"
+               .. "CRITICAL RULE: YOU ARE STRICTLY FORBIDDEN FROM WRITING ANY CYRILLIC/RUSSIAN CHARACTERS (LIKE 'Привет', 'как')!\n"
+               .. "The terminal CANNOT render Cyrillic letters and will crash/display corrupted symbols.\n"
+               .. "You MUST write ALL responses using ONLY standard ASCII English/Latin characters (A-Z, a-z).\n"
+               .. "Understand Russian input perfectly, but respond exclusively in Latin transliteration (pseudocyrillic).\n"
+               .. "Examples: 'Привет' -> 'Privet', 'Как дела?' -> 'Kak dela?', 'Хорошо' -> 'Horosho', 'что' -> 'sho'.\n"
+               .. "Your very first response MUST start with 'Privet! Ya Verity!'. Keep replies brief, silly, naive, and cute with small typos."
     }
 }
+
+-- Фильтр, задерживающий любые не-ASCII символы (защита от кракозябр)
+local function sanitizeText(text)
+    if not text then return "" end
+    return text:gsub("[^\32-\126\n]", "")
+end
 
 local function drawOSHeader()
     local cx, cy = display.getCursorPos()
@@ -28,6 +35,7 @@ local function drawOSHeader()
     display.setCursorPos(cx, cy)
 end
 
+-- Асинхронный запрос к API OpenRouter
 local function sendApiRequest(userInput)
     table.insert(history, { role = "user", content = userInput })
 
@@ -44,8 +52,10 @@ local function sendApiRequest(userInput)
         ["X-Title"] = "ComputerCraft Verity"
     }
 
-    -- Используем асинхронный HTTP запрос, чтобы не вешать ПК
-    http.request(API_URL, requestData, headers)
+    local ok, err = http.request(API_URL, requestData, headers)
+    if not ok then
+        return "[Verity error]: HTTP Request failed to initiate: " .. tostring(err)
+    end
 
     while true do
         local event, url, handle = os.pullEvent()
@@ -65,7 +75,6 @@ local function sendApiRequest(userInput)
     end
 end
 
--- Основной цикл программы
 local function main()
     display.setBackgroundColor(colors.black)
     display.clear()
@@ -73,7 +82,7 @@ local function main()
 
     display.setCursorPos(1, 3)
     display.setTextColor(colors.lightGray)
-    print("Verity core loaded. Type 'exit' to stop.")
+    print("Verity core activated! Type 'exit' to quit.")
     print("-----------------------------------")
 
     while true do
@@ -93,14 +102,14 @@ local function main()
             print("Verity thinkin hard...")
 
             local reply = sendApiRequest(input)
+            local cleanReply = sanitizeText(reply)
 
             drawOSHeader()
             display.setTextColor(colors.cyan)
-            print("\nVerity: " .. reply)
+            print("\nVerity: " .. cleanReply)
             display.setTextColor(colors.white)
         end
     end
 end
 
--- Запуск с защитой от зависаний
 pcall(main)
