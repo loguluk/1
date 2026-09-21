@@ -1,31 +1,27 @@
 local API_KEY = ""
-local API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" .. API_KEY
+local API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 local body = textutils.serializeJSON({
-    contents = {
-        {
-            role = "user",
-            parts = { { text = "hi" } }
-        }
-    }
+    model = "meta-llama/llama-3.3-70b-instruct:free",
+    messages = { { role = "user", content = "hi" } }
 })
 
 local headers = {
-    ["Content-Type"] = "application/json"
+    ["Content-Type"] = "application/json",
+    ["Authorization"] = "Bearer " .. API_KEY
 }
 
-print("Testing Google Gemini API...")
+print("Testing OpenRouter API...")
 local res, err, errRes = http.post(API_URL, body, headers)
 
 if res then
-    print("\n[SUCCESS] Response code: " .. res.getResponseCode())
-    print("Response body:")
+    print("\n[SUCCESS] Code: " .. res.getResponseCode())
+    print("Response:")
     print(res.readAll())
     res.close()
 elseif errRes then
     print("\n[HTTP ERROR] Code: " .. errRes.getResponseCode())
-    print("Error details:")
-    print(errRes.readAll())
+    print("Details: " .. errRes.readAll())
     errRes.close()
 else
     print("\n[CONNECTION FAILED]: " .. tostring(err))
