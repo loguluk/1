@@ -46,7 +46,7 @@ local sideMoveLeft     = "left"
 local sideMoveRight    = "right"
 local sideTopSignal    = "top" -- Сигнал сверху от Redstone Relay
 
--- Timer for Rednet Cooldown
+-- Cooldown Timer for Rednet Signal
 local lastSendTime = 0
 
 term.clear()
