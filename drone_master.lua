@@ -44,7 +44,7 @@ local sideMoveRight    = "right"
 
 term.clear()
 term.setCursorPos(1, 1)
-print("=== DRONE CONTROLLER (FIXED DIRECTION) ===")
+print("=== DRONE CONTROLLER ONLINE ===")
 
 while true do
     local isThrustUp   = rs.getInput(sideThrustUp)
@@ -72,8 +72,8 @@ while true do
     if isRight then roll = 1 end
 
     -- 3. Calculate Individual Motor Speeds
-    -- Pitch: Вперед -> задние моторы убавляют/передние прибавляют (и наоборот)
-    -- Roll: Вправо -> правые моторы убавляют/левые прибавляют
+    -- Pitch: Вперед -> передние моторы прибавляют, задние убавляют
+    -- Roll: Вправо -> левые моторы прибавляют, правые убавляют
     local speedFL = math.max(0, math.min(maxSpeed, baseSpeed + (pitch * tilt) + (roll * tilt)))
     local speedFR = math.max(0, math.min(maxSpeed, baseSpeed + (pitch * tilt) - (roll * tilt)))
     local speedBL = math.max(0, math.min(maxSpeed, baseSpeed - (pitch * tilt) + (roll * tilt)))
