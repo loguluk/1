@@ -1,15 +1,17 @@
--- Master Auto-Factory & Crafting Station
--- Target Turtle: turtle_21 (ID: 104)
+-- Master Factory Controller (English Version)
+-- Connected Turtle: turtle_21 (ID: 104)
+
+local RECIPE_FILE = "recipes.json"
 
 local monitor = peripheral.find("monitor")
-if not monitor then
-    error("Ошибка: Монитор 5x4 не найден!")
+if monitor then
+    monitor.setTextScale(0.5)
+    monitor.clear()
+else
+    print("Warning: Monitor peripheral not found!")
 end
 
-monitor.setTextScale(0.5)
-
--- Список устройств
-local dev = {
+local devices = {
     depotPress = "create:depot_14",
     depotArm   = "create:depot_16",
     deployer   = "create:deployer_9",
@@ -19,73 +21,26 @@ local dev = {
 }
 
 local recipes = {}
-local RECIPE_FILE = "recipes.json"
 
--- Загрузка рецептов из файла
 function loadRecipes()
     if fs.exists(RECIPE_FILE) then
-        local file = fs.open(RECIPE_FILE, "r")
-        recipes = textutils.unserializeJSON(file.readAll()) or {}
-        file.close()
+        local f = fs.open(RECIPE_FILE, "r")
+        local data = f.readAll()
+        f.close()
+        recipes = textutils.unserializeJSON(data) or {}
     end
 end
 
--- Сохранение рецептов в файл
 function saveRecipes()
-    local file = fs.open(RECIPE_FILE, "w")
-    file.write(textutils.serializeJSON(recipes))
-    file.close()
+    local f = fs.open(RECIPE_FILE, "w")
+    f.write(textutils.serializeJSON(recipes))
+    f.close()
 end
 
 loadRecipes()
 
--- Отрисовка интерфейса на мониторе 5x4
-function drawMonitor()
-    monitor.setBackgroundColor(colors.black)
-    monitor.clear()
-
-    -- Шапка
-    monitor.setCursorPos(2, 2)
-    monitor.setTextColor(colors.yellow)
-    monitor.write("=== AUTO-FACTORY 3x3 & CREATE ===")
-
-    -- Статус устройств
-    monitor.setCursorPos(2, 4)
-    monitor.setTextColor(colors.cyan)
-    monitor.write("УСТРОЙСТВА В СЕТИ:")
-
-    local statusY = 5
-    for label, name in pairs(dev) do
-        monitor.setCursorPos(4, statusY)
-        if peripheral.isPresent(name) then
-            monitor.setTextColor(colors.green)
-            monitor.write("[+] " .. label .. " (" .. name .. ")")
-        else
-            monitor.setTextColor(colors.red)
-            monitor.write("[-] " .. label .. " (OFFLINE)")
-        end
-        statusY = statusY + 1
-    end
-
-    -- Список рецептов
-    monitor.setCursorPos(2, 12)
-    monitor.setTextColor(colors.orange)
-    monitor.write("СОХРАНЁННЫЕ РЕЦЕПТЫ (" .. #recipes .. "):")
-
-    for i, r in ipairs(recipes) do
-        if i <= 6 then
-            monitor.setCursorPos(4, 12 + i)
-            monitor.setTextColor(colors.white)
-            monitor.write(i .. ". " .. r.name .. " [" .. r.type .. "]")
-        end
-    end
-
-    -- Интерактивные кнопки
-    drawButton(2, 20, 22, 3, colors.blue, " [1] ЗАПИСАТЬ РЕЦЕПТ ")
-    drawButton(26, 20, 22, 3, colors.lime, " [2] СРАЗУ СКАНИРОВАТЬ ")
-end
-
 function drawButton(x, y, w, h, bg, text)
+    if not monitor then return end
     monitor.setBackgroundColor(bg)
     monitor.setTextColor(colors.white)
     for i = 0, h - 1 do
@@ -97,120 +52,156 @@ function drawButton(x, y, w, h, bg, text)
     monitor.setBackgroundColor(colors.black)
 end
 
--- Считывание состояния всех блоков (поддержка нескольких предметов в чашах)
-function scanAllInventories()
-    local snapshot = {}
-    local targets = {
-        dev.depotPress, dev.depotArm, dev.basinPress, 
-        dev.basinMixer, dev.deployer, dev.turtle
-    }
+function updateMonitor()
+    if not monitor then return end
+    monitor.setBackgroundColor(colors.black)
+    monitor.clear()
 
-    for _, pName in ipairs(targets) do
-        local obj = peripheral.wrap(pName)
-        if obj and obj.list then
-            snapshot[pName] = {}
-            local items = obj.list()
-            for slot, item in pairs(items) do
-                table.insert(snapshot[pName], {
-                    slot = slot,
-                    name = item.name,
-                    count = item.count
-                })
-            end
+    monitor.setCursorPos(2, 2)
+    monitor.setTextColor(colors.yellow)
+    monitor.write("=== AUTO-FACTORY CONTROLLER (TURTLE 104) ===")
+
+    monitor.setCursorPos(2, 4)
+    monitor.setTextColor(colors.cyan)
+    monitor.write("DEVICE STATUS:")
+
+    local statusY = 5
+    for label, name in pairs(devices) do
+        monitor.setCursorPos(4, statusY)
+        if peripheral.isPresent(name) then
+            monitor.setTextColor(colors.green)
+            monitor.write("[+] " .. label .. " (" .. name .. ")")
+        else
+            monitor.setTextColor(colors.red)
+            monitor.write("[-] " .. label .. " (OFFLINE)")
+        end
+        statusY = statusY + 1
+    end
+
+    monitor.setCursorPos(2, 12)
+    monitor.setTextColor(colors.orange)
+    monitor.write("SAVED RECIPES (" .. #recipes .. "):")
+
+    for i, r in ipairs(recipes) do
+        if i <= 5 then
+            monitor.setCursorPos(4, 12 + i)
+            monitor.setTextColor(colors.lightBlue)
+            monitor.write(i .. ". " .. r.name .. " -> " .. (r.output or "Unknown"))
         end
     end
-    return snapshot
+
+    drawButton(2, 19, 22, 3, colors.blue, " [1] RECORD RECIPE ")
+    drawButton(26, 19, 22, 3, colors.gray, " [2] REFRESH ")
 end
 
--- Запись рецепта с шаблоном 3x3 и мульти-компонентами
-function recordNewRecipe(recipeName)
+function snapshotInventories()
+    local snap = {}
+    for label, devName in pairs(devices) do
+        if peripheral.isPresent(devName) then
+            local p = peripheral.wrap(devName)
+            if p and p.list then
+                snap[devName] = {}
+                local items = p.list()
+                for slot, item in pairs(items) do
+                    snap[devName][slot] = { name = item.name, count = item.count }
+                end
+            end
+        end
+    end
+    return snap
+end
+
+function recordRecipeInteractive()
     term.clear()
     term.setCursorPos(1, 1)
-    print("=== ЗАПИСЬ НОВОГО РЕЦЕПТА: " .. recipeName .. " ===")
-    print("1. Разложите ингредиенты по блокам / в сетку черепашки 3x3.")
-    print("2. Нажмите ENTER, когда всё будет готово к сканированию...")
-    read()
+    print("=== RECORD NEW RECIPE ===")
+    write("Enter recipe name: ")
+    local recipeName = read()
+    if recipeName == "" then return end
 
-    local initialInputs = scanAllInventories()
-    
+    print("\n1. Clear containers or place them in initial state.")
+    print("Press ENTER to capture BEFORE snapshot...")
+    read()
+    local beforeSnap = snapshotInventories()
+
+    print("\n2. Place ingredients in basins/depots or turtle 3x3 grid.")
+    print("Press ENTER to capture AFTER snapshot...")
+    read()
+    local afterSnap = snapshotInventories()
+
     local newRecipe = {
         name = recipeName,
-        type = "3x3_TURTLE",
         grid3x3 = {},
-        basins = {},
-        depots = {}
+        inputs = {},
+        outputs = {}
     }
 
-    -- 1. Сканируем Turtle 21 на наличие шаблона 3x3
-    local turtleObj = peripheral.wrap(dev.turtle)
-    if turtleObj and turtleObj.list then
-        local tItems = turtleObj.list()
-        for slot, item in pairs(tItems) do
-            if slot <= 9 then -- Первые 9 слотов образуют сетку крафта 3x3
-                newRecipe.grid3x3[slot] = { name = item.name, count = item.count }
+    if afterSnap[devices.turtle] then
+        for slot = 1, 9 do
+            if afterSnap[devices.turtle][slot] then
+                newRecipe.grid3x3[slot] = afterSnap[devices.turtle][slot]
             end
         end
     end
 
-    -- 2. Сканируем Чаши (Basin 10 / Basin 11) на мульти-предметы
-    for _, basinName in ipairs({dev.basinPress, dev.basinMixer}) do
-        if initialInputs[basinName] then
-            newRecipe.basins[basinName] = initialInputs[basinName]
+    for devName, slots in pairs(afterSnap) do
+        for slot, item in pairs(slots) do
+            local prevCount = (beforeSnap[devName] and beforeSnap[devName][slot]) and beforeSnap[devName][slot].count or 0
+            local diff = item.count - prevCount
+
+            if diff > 0 then
+                table.insert(newRecipe.outputs, { device = devName, item = item.name, count = diff })
+                newRecipe.output = item.name
+            elseif diff < 0 then
+                table.insert(newRecipe.inputs, { device = devName, item = item.name, count = math.abs(diff) })
+            end
         end
     end
 
     table.insert(recipes, newRecipe)
     saveRecipes()
-    drawMonitor()
+    updateMonitor()
 
-    print("Успех! Рецепт '" .. recipeName .. "' сохранён в recipes.json!")
+    print("\nRecipe '" .. recipeName .. "' saved successfully to recipes.json!")
     sleep(2)
 end
 
--- Обработка нажатий на мониторе
-function handleMonitorTouch()
-    while true do
-        local event, side, x, y = os.pullEvent("monitor_touch")
-        
-        -- Кнопка "ЗАПИСАТЬ РЕЦЕПТ"
-        if y >= 20 and y <= 22 and x >= 2 and x <= 24 then
-            term.clear()
-            term.setCursorPos(1, 1)
-            write("Введите имя нового рецепта: ")
-            local name = read()
-            if name ~= "" then
-                recordNewRecipe(name)
+updateMonitor()
+
+parallel.waitForAny(
+    function()
+        while true do
+            local event, side, x, y = os.pullEvent("monitor_touch")
+            if y >= 19 and y <= 21 then
+                if x >= 2 and x <= 24 then
+                    recordRecipeInteractive()
+                elseif x >= 26 and x <= 48 then
+                    updateMonitor()
+                end
             end
         end
-    end
-end
+    end,
 
--- Главный поток
-drawMonitor()
-parallel.waitForAny(
-    handleMonitorTouch,
     function()
         while true do
             term.clear()
             term.setCursorPos(1, 1)
             print("=================================")
-            print("   ТЕРМИНАЛ УПРАВЛЕНИЯ ФАБРИКОЙ   ")
+            print("  FACTORY CONTROLLER (TURTLE 104)")
             print("=================================")
-            print("1. Записать новый рецепт")
-            print("2. Перерисовать монитор")
-            print("3. Проверить файл recipes.json")
+            print("1. Record new recipe (Before/After)")
+            print("2. Refresh monitor display")
+            print("3. View recipes status")
             print("---------------------------------")
-            write("Выберите действие: ")
-            
-            local c = read()
-            if c == "1" then
-                write("Имя рецепта: ")
-                local name = read()
-                recordNewRecipe(name)
-            elseif c == "2" then
-                drawMonitor()
-            elseif c == "3" then
-                print("Файл сохранён. Записей: " .. #recipes)
+            write("Select option: ")
+
+            local choice = read()
+            if choice == "1" then
+                recordRecipeInteractive()
+            elseif choice == "2" then
+                updateMonitor()
+            elseif choice == "3" then
+                print("\nTotal stored recipes: " .. #recipes)
                 sleep(2)
             end
         end
