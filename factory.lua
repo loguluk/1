@@ -1,15 +1,15 @@
--- Master Factory Controller (English Version)
+-- Master Factory Controller (100% Monitor GUI + Real-time Recording)
 -- Connected Turtle: turtle_21 (ID: 104)
 
 local RECIPE_FILE = "recipes.json"
 
 local monitor = peripheral.find("monitor")
-if monitor then
-    monitor.setTextScale(0.5)
-    monitor.clear()
-else
-    print("Warning: Monitor peripheral not found!")
+if not monitor then
+    error("Error: Monitor not found!")
 end
+
+monitor.setTextScale(0.5)
+monitor.clear()
 
 local devices = {
     depotPress = "create:depot_14",
@@ -21,7 +21,20 @@ local devices = {
 }
 
 local recipes = {}
+local currentPage = "MAIN" -- Страницы: "MAIN" или "RECORD"
 
+-- Переменные для онлайн-записи
+local isRecording = false
+local currentRecordingData = {
+    inputs = {},
+    outputs = {},
+    logs = {}
+}
+local initialSnap = {}
+
+----------------------------------------------------
+-- Загрузка и Сохранение рецептов
+----------------------------------------------------
 function loadRecipes()
     if fs.exists(RECIPE_FILE) then
         local f = fs.open(RECIPE_FILE, "r")
@@ -39,61 +52,23 @@ end
 
 loadRecipes()
 
-function drawButton(x, y, w, h, bg, text)
-    if not monitor then return end
+----------------------------------------------------
+-- Отрисовка элементов UI
+----------------------------------------------------
+function drawButton(x, y, w, h, bg, textColor, text)
     monitor.setBackgroundColor(bg)
-    monitor.setTextColor(colors.white)
+    monitor.setTextColor(textColor)
     for i = 0, h - 1 do
         monitor.setCursorPos(x, y + i)
         monitor.write(string.rep(" ", w))
     end
-    monitor.setCursorPos(x + 1, y + math.floor(h / 2))
+    local textX = x + math.floor((w - #text) / 2)
+    monitor.setCursorPos(textX, y + math.floor(h / 2))
     monitor.write(text)
     monitor.setBackgroundColor(colors.black)
 end
 
-function updateMonitor()
-    if not monitor then return end
-    monitor.setBackgroundColor(colors.black)
-    monitor.clear()
-
-    monitor.setCursorPos(2, 2)
-    monitor.setTextColor(colors.yellow)
-    monitor.write("=== AUTO-FACTORY CONTROLLER (TURTLE 104) ===")
-
-    monitor.setCursorPos(2, 4)
-    monitor.setTextColor(colors.cyan)
-    monitor.write("DEVICE STATUS:")
-
-    local statusY = 5
-    for label, name in pairs(devices) do
-        monitor.setCursorPos(4, statusY)
-        if peripheral.isPresent(name) then
-            monitor.setTextColor(colors.green)
-            monitor.write("[+] " .. label .. " (" .. name .. ")")
-        else
-            monitor.setTextColor(colors.red)
-            monitor.write("[-] " .. label .. " (OFFLINE)")
-        end
-        statusY = statusY + 1
-    end
-
-    monitor.setCursorPos(2, 12)
-    monitor.setTextColor(colors.orange)
-    monitor.write("SAVED RECIPES (" .. #recipes .. "):")
-
-    for i, r in ipairs(recipes) do
-        if i <= 5 then
-            monitor.setCursorPos(4, 12 + i)
-            monitor.setTextColor(colors.lightBlue)
-            monitor.write(i .. ". " .. r.name .. " -> " .. (r.output or "Unknown"))
-        end
-    end
-
-    drawButton(2, 19, 22, 3, colors.blue, " [1] RECORD RECIPE ")
-    drawButton(26, 19, 22, 3, colors.gray, " [2] REFRESH ")
-end
-
+-- Снимок всех инвентарей
 function snapshotInventories()
     local snap = {}
     for label, devName in pairs(devices) do
@@ -111,98 +86,213 @@ function snapshotInventories()
     return snap
 end
 
-function recordRecipeInteractive()
-    term.clear()
-    term.setCursorPos(1, 1)
-    print("=== RECORD NEW RECIPE ===")
-    write("Enter recipe name: ")
-    local recipeName = read()
-    if recipeName == "" then return end
+----------------------------------------------------
+-- ЭКРАН 1: Главный Дашборд
+----------------------------------------------------
+function drawMainPage()
+    monitor.setBackgroundColor(colors.black)
+    monitor.clear()
 
-    print("\n1. Clear containers or place them in initial state.")
-    print("Press ENTER to capture BEFORE snapshot...")
-    read()
-    local beforeSnap = snapshotInventories()
+    -- Шапка
+    monitor.setCursorPos(2, 2)
+    monitor.setTextColor(colors.yellow)
+    monitor.write("=== AUTO-FACTORY CONTROLLER (TURTLE 104) ===")
 
-    print("\n2. Place ingredients in basins/depots or turtle 3x3 grid.")
-    print("Press ENTER to capture AFTER snapshot...")
-    read()
-    local afterSnap = snapshotInventories()
+    -- Статус устройств
+    monitor.setCursorPos(2, 4)
+    monitor.setTextColor(colors.cyan)
+    monitor.write("CONNECTED DEVICES:")
 
-    local newRecipe = {
-        name = recipeName,
-        grid3x3 = {},
-        inputs = {},
-        outputs = {}
-    }
+    local statusY = 5
+    for label, name in pairs(devices) do
+        monitor.setCursorPos(4, statusY)
+        if peripheral.isPresent(name) then
+            monitor.setTextColor(colors.green)
+            monitor.write("[+] " .. label .. " (" .. name .. ")")
+        else
+            monitor.setTextColor(colors.red)
+            monitor.write("[-] " .. label .. " (OFFLINE)")
+        end
+        statusY = statusY + 1
+    end
 
-    if afterSnap[devices.turtle] then
-        for slot = 1, 9 do
-            if afterSnap[devices.turtle][slot] then
-                newRecipe.grid3x3[slot] = afterSnap[devices.turtle][slot]
+    -- Список сохранённых рецептов
+    monitor.setCursorPos(2, 12)
+    monitor.setTextColor(colors.orange)
+    monitor.write("STORED RECIPES (" .. #recipes .. "):")
+
+    for i, r in ipairs(recipes) do
+        if i <= 5 then
+            monitor.setCursorPos(4, 12 + i)
+            monitor.setTextColor(colors.lightBlue)
+            monitor.write(i .. ". " .. (r.name or "Recipe") .. " -> " .. (r.output or "Unknown"))
+        end
+    end
+
+    -- Кнопка записи
+    drawButton(2, 19, 24, 3, colors.blue, colors.white, "[ RECORD RECIPE ]")
+    drawButton(28, 19, 20, 3, colors.gray, colors.white, "[ REFRESH ]")
+end
+
+----------------------------------------------------
+-- ЭКРАН 2: Страница записи в реальном времени
+----------------------------------------------------
+function drawRecordPage()
+    monitor.setBackgroundColor(colors.black)
+    monitor.clear()
+
+    -- Заголовок режима записи
+    monitor.setCursorPos(2, 2)
+    monitor.setTextColor(colors.red)
+    monitor.write("=== RECORDER MODE (LIVE TRACKING 1s) ===")
+
+    monitor.setCursorPos(2, 4)
+    monitor.setTextColor(colors.white)
+    monitor.write("Current Items on Devices:")
+
+    -- Живой список всех находящихся предметов
+    local currentSnap = snapshotInventories()
+    local lineY = 5
+
+    for label, devName in pairs(devices) do
+        if currentSnap[devName] then
+            for slot, item in pairs(currentSnap[devName]) do
+                if lineY <= 12 then
+                    monitor.setCursorPos(4, lineY)
+                    monitor.setTextColor(colors.yellow)
+                    monitor.write("-> " .. label .. ": ")
+                    monitor.setTextColor(colors.lime)
+                    monitor.write(item.count .. "x " .. item.name:gsub(".*:", ""))
+                    lineY = lineY + 1
+                end
             end
         end
     end
 
-    for devName, slots in pairs(afterSnap) do
+    if lineY == 5 then
+        monitor.setCursorPos(4, 5)
+        monitor.setTextColor(colors.gray)
+        monitor.write("(No items detected on depots/basins...)")
+    end
+
+    -- Лог событий
+    monitor.setCursorPos(2, 14)
+    monitor.setTextColor(colors.cyan)
+    monitor.write("EVENT LOG:")
+
+    local logStart = math.max(1, #currentRecordingData.logs - 3)
+    local displayIdx = 0
+    for i = logStart, #currentRecordingData.logs do
+        monitor.setCursorPos(4, 15 + displayIdx)
+        monitor.setTextColor(colors.lightGray)
+        monitor.write(currentRecordingData.logs[i])
+        displayIdx = displayIdx + 1
+    end
+
+    -- Кнопки управления записью
+    drawButton(2, 19, 22, 3, colors.green, colors.black, "[ SAVE RECIPE ]")
+    drawButton(26, 19, 22, 3, colors.red, colors.white, "[ CANCEL ]")
+end
+
+----------------------------------------------------
+-- Логика Записи и Отслеживания
+----------------------------------------------------
+function startRecording()
+    currentPage = "RECORD"
+    isRecording = true
+    initialSnap = snapshotInventories()
+    currentRecordingData = {
+        inputs = {},
+        outputs = {},
+        logs = { "Started recording..." }
+    }
+    drawRecordPage()
+end
+
+function processRecordingStep()
+    if not isRecording then return end
+    local nowSnap = snapshotInventories()
+
+    for devName, slots in pairs(nowSnap) do
+        -- Ищем короткое имя устройства
+        local shortLabel = devName
+        for l, n in pairs(devices) do
+            if n == devName then shortLabel = l break end
+        end
+
         for slot, item in pairs(slots) do
-            local prevCount = (beforeSnap[devName] and beforeSnap[devName][slot]) and beforeSnap[devName][slot].count or 0
+            local prevCount = (initialSnap[devName] and initialSnap[devName][slot]) and initialSnap[devName][slot].count or 0
             local diff = item.count - prevCount
 
             if diff > 0 then
-                table.insert(newRecipe.outputs, { device = devName, item = item.name, count = diff })
-                newRecipe.output = item.name
-            elseif diff < 0 then
-                table.insert(newRecipe.inputs, { device = devName, item = item.name, count = math.abs(diff) })
+                local logMsg = "+" .. diff .. " " .. item.name:gsub(".*:", "") .. " at " .. shortLabel
+                if #currentRecordingData.logs == 0 or currentRecordingData.logs[#currentRecordingData.logs] ~= logMsg then
+                    table.insert(currentRecordingData.logs, logMsg)
+                    currentRecordingData.output = item.name
+                end
             end
         end
     end
+    drawRecordPage()
+end
+
+function saveCurrentRecipe()
+    local finalSnap = snapshotInventories()
+    local recipeName = "Recipe_" .. (#recipes + 1)
+    
+    local newRecipe = {
+        name = recipeName,
+        output = currentRecordingData.output or "Process_Done",
+        timestamp = os.time()
+    }
 
     table.insert(recipes, newRecipe)
     saveRecipes()
-    updateMonitor()
 
-    print("\nRecipe '" .. recipeName .. "' saved successfully to recipes.json!")
-    sleep(2)
+    isRecording = false
+    currentPage = "MAIN"
+    drawMainPage()
 end
 
-updateMonitor()
+----------------------------------------------------
+-- Главный цикл обработки событий
+----------------------------------------------------
+drawMainPage()
 
 parallel.waitForAny(
+    -- 1. Клики по монитору
     function()
         while true do
             local event, side, x, y = os.pullEvent("monitor_touch")
-            if y >= 19 and y <= 21 then
-                if x >= 2 and x <= 24 then
-                    recordRecipeInteractive()
-                elseif x >= 26 and x <= 48 then
-                    updateMonitor()
+            
+            if currentPage == "MAIN" then
+                if y >= 19 and y <= 21 then
+                    if x >= 2 and x <= 26 then
+                        startRecording()
+                    elseif x >= 28 and x <= 48 then
+                        drawMainPage()
+                    end
+                end
+            elseif currentPage == "RECORD" then
+                if y >= 19 and y <= 21 then
+                    if x >= 2 and x <= 24 then
+                        saveCurrentRecipe()
+                    elseif x >= 26 and x <= 48 then
+                        isRecording = false
+                        currentPage = "MAIN"
+                        drawMainPage()
+                    end
                 end
             end
         end
     end,
 
+    -- 2. Таймер обновления записи (каждую 1 секунду)
     function()
         while true do
-            term.clear()
-            term.setCursorPos(1, 1)
-            print("=================================")
-            print("  FACTORY CONTROLLER (TURTLE 104)")
-            print("=================================")
-            print("1. Record new recipe (Before/After)")
-            print("2. Refresh monitor display")
-            print("3. View recipes status")
-            print("---------------------------------")
-            write("Select option: ")
-
-            local choice = read()
-            if choice == "1" then
-                recordRecipeInteractive()
-            elseif choice == "2" then
-                updateMonitor()
-            elseif choice == "3" then
-                print("\nTotal stored recipes: " .. #recipes)
-                sleep(2)
+            sleep(1)
+            if isRecording and currentPage == "RECORD" then
+                processRecordingStep()
             end
         end
     end
