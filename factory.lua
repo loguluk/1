@@ -1,4 +1,4 @@
--- Master Factory Controller (100% Monitor GUI + Real-time Recording)
+-- Master Factory Controller (100% Monitor 4-Wide GUI + Electric Motor Control)
 -- Connected Turtle: turtle_21 (ID: 104)
 
 local RECIPE_FILE = "recipes.json"
@@ -17,13 +17,13 @@ local devices = {
     deployer   = "create:deployer_9",
     basinPress = "create:basin_10",
     basinMixer = "create:basin_11",
-    turtle     = "turtle_21"
+    turtle     = "turtle_21",
+    motor      = "create:electric_motor_5"
 }
 
 local recipes = {}
-local currentPage = "MAIN" -- Страницы: "MAIN" или "RECORD"
+local currentPage = "MAIN" -- "MAIN" или "RECORD"
 
--- Переменные для онлайн-записи
 local isRecording = false
 local currentRecordingData = {
     inputs = {},
@@ -31,6 +31,7 @@ local currentRecordingData = {
     logs = {}
 }
 local initialSnap = {}
+local motorState = false -- false = Speed 0 (STOP), true = Speed 256 (RUN)
 
 ----------------------------------------------------
 -- Загрузка и Сохранение рецептов
@@ -53,7 +54,21 @@ end
 loadRecipes()
 
 ----------------------------------------------------
--- Отрисовка элементов UI
+-- Управление Electric Motor (create:electric_motor_5)
+----------------------------------------------------
+function setMotorSpeed(speed)
+    if peripheral.isPresent(devices.motor) then
+        local motor = peripheral.wrap(devices.motor)
+        if motor and motor.setSpeed then
+            motor.setSpeed(speed)
+            return true
+        end
+    end
+    return false
+end
+
+----------------------------------------------------
+-- Отрисовка UI для Монитора 4 блока
 ----------------------------------------------------
 function drawButton(x, y, w, h, bg, textColor, text)
     monitor.setBackgroundColor(bg)
@@ -68,11 +83,10 @@ function drawButton(x, y, w, h, bg, textColor, text)
     monitor.setBackgroundColor(colors.black)
 end
 
--- Снимок всех инвентарей
 function snapshotInventories()
     local snap = {}
     for label, devName in pairs(devices) do
-        if peripheral.isPresent(devName) then
+        if devName ~= devices.motor and peripheral.isPresent(devName) then
             local p = peripheral.wrap(devName)
             if p and p.list then
                 snap[devName] = {}
@@ -96,16 +110,17 @@ function drawMainPage()
     -- Шапка
     monitor.setCursorPos(2, 2)
     monitor.setTextColor(colors.yellow)
-    monitor.write("=== AUTO-FACTORY CONTROLLER (TURTLE 104) ===")
+    monitor.write("============================== AUTO-FACTORY CONTROLLER (4-WIDE) ==============================")
 
-    -- Статус устройств
+    -- Устройства
     monitor.setCursorPos(2, 4)
     monitor.setTextColor(colors.cyan)
     monitor.write("CONNECTED DEVICES:")
 
     local statusY = 5
+    local col = 4
     for label, name in pairs(devices) do
-        monitor.setCursorPos(4, statusY)
+        monitor.setCursorPos(col, statusY)
         if peripheral.isPresent(name) then
             monitor.setTextColor(colors.green)
             monitor.write("[+] " .. label .. " (" .. name .. ")")
@@ -114,53 +129,68 @@ function drawMainPage()
             monitor.write("[-] " .. label .. " (OFFLINE)")
         end
         statusY = statusY + 1
+        if statusY > 9 then
+            statusY = 5
+            col = col + 38
+        end
     end
 
-    -- Список сохранённых рецептов
-    monitor.setCursorPos(2, 12)
+    -- Список рецептов
+    monitor.setCursorPos(2, 11)
     monitor.setTextColor(colors.orange)
     monitor.write("STORED RECIPES (" .. #recipes .. "):")
 
     for i, r in ipairs(recipes) do
         if i <= 5 then
-            monitor.setCursorPos(4, 12 + i)
+            monitor.setCursorPos(4, 11 + i)
             monitor.setTextColor(colors.lightBlue)
-            monitor.write(i .. ". " .. (r.name or "Recipe") .. " -> " .. (r.output or "Unknown"))
+            monitor.write(i .. ". " .. (r.name or "Recipe") .. " -> Output: " .. (r.output or "Unknown"))
         end
     end
 
-    -- Кнопка записи
-    drawButton(2, 19, 24, 3, colors.blue, colors.white, "[ RECORD RECIPE ]")
-    drawButton(28, 19, 20, 3, colors.gray, colors.white, "[ REFRESH ]")
+    -- Кнопки главного меню
+    drawButton(2, 18, 30, 4, colors.blue, colors.white, "[ RECORD RECIPE ]")
+    drawButton(34, 18, 24, 4, colors.gray, colors.white, "[ REFRESH ]")
 end
 
 ----------------------------------------------------
--- ЭКРАН 2: Страница записи в реальном времени
+-- ЭКРАН 2: Запись и Мотор
 ----------------------------------------------------
 function drawRecordPage()
     monitor.setBackgroundColor(colors.black)
     monitor.clear()
 
-    -- Заголовок режима записи
     monitor.setCursorPos(2, 2)
     monitor.setTextColor(colors.red)
-    monitor.write("=== RECORDER MODE (LIVE TRACKING 1s) ===")
+    monitor.write("=========================== RECORDER MODE (REAL-TIME MONITORING) ===========================")
 
+    -- Состояние мотора
     monitor.setCursorPos(2, 4)
     monitor.setTextColor(colors.white)
-    monitor.write("Current Items on Devices:")
+    monitor.write("ELECTRIC MOTOR 5 STATUS: ")
+    if motorState then
+        monitor.setTextColor(colors.green)
+        monitor.write("RUNNING (256 RPM)")
+    else
+        monitor.setTextColor(colors.red)
+        monitor.write("STOPPED (0 RPM)")
+    end
 
-    -- Живой список всех находящихся предметов
+    -- Содержимое блоков
+    monitor.setCursorPos(2, 6)
+    monitor.setTextColor(colors.cyan)
+    monitor.write("CURRENT ITEMS ON MACHINES:")
+
     local currentSnap = snapshotInventories()
-    local lineY = 5
+    local lineY = 7
 
     for label, devName in pairs(devices) do
-        if currentSnap[devName] then
+        if devName ~= devices.motor and currentSnap[devName] then
             for slot, item in pairs(currentSnap[devName]) do
                 if lineY <= 12 then
                     monitor.setCursorPos(4, lineY)
                     monitor.setTextColor(colors.yellow)
-                    monitor.write("-> " .. label .. ": ")
+                    monitor.write("-> " .. label .. " (slot " .. slot .. "): ")
                     monitor.setTextColor(colors.lime)
                     monitor.write(item.count .. "x " .. item.name:gsub(".*:", ""))
                     lineY = lineY + 1
@@ -169,42 +199,46 @@ function drawRecordPage()
         end
     end
 
-    if lineY == 5 then
-        monitor.setCursorPos(4, 5)
+    if lineY == 7 then
+        monitor.setCursorPos(4, 7)
         monitor.setTextColor(colors.gray)
-        monitor.write("(No items detected on depots/basins...)")
+        monitor.write("(No items placed on machines yet...)")
     end
 
-    -- Лог событий
-    monitor.setCursorPos(2, 14)
-    monitor.setTextColor(colors.cyan)
-    monitor.write("EVENT LOG:")
+    -- Кнопка мотора и записи
+    if motorState then
+        drawButton(2, 14, 32, 3, colors.red, colors.white, "[ STOP MOTOR (SET SPEED 0) ]")
+    else
+        drawButton(2, 14, 32, 3, colors.green, colors.black, "[ START MOTOR (SET SPEED 256) ]")
+    end
 
-    local logStart = math.max(1, #currentRecordingData.logs - 3)
-    local displayIdx = 0
-    for i = logStart, #currentRecordingData.logs do
-        monitor.setCursorPos(4, 15 + displayIdx)
+    -- Лог
+    monitor.setCursorPos(2, 18)
+    monitor.setTextColor(colors.orange)
+    monitor.write("LOG: ")
+    if #currentRecordingData.logs > 0 then
         monitor.setTextColor(colors.lightGray)
-        monitor.write(currentRecordingData.logs[i])
-        displayIdx = displayIdx + 1
+        monitor.write(currentRecordingData.logs[#currentRecordingData.logs])
     end
 
-    -- Кнопки управления записью
-    drawButton(2, 19, 22, 3, colors.green, colors.black, "[ SAVE RECIPE ]")
-    drawButton(26, 19, 22, 3, colors.red, colors.white, "[ CANCEL ]")
+    -- Кнопки сохранения/отмены
+    drawButton(2, 20, 24, 3, colors.blue, colors.white, "[ SAVE RECIPE ]")
+    drawButton(28, 20, 24, 3, colors.gray, colors.white, "[ CANCEL ]")
 end
 
 ----------------------------------------------------
--- Логика Записи и Отслеживания
+-- Логика Записи
 ----------------------------------------------------
 function startRecording()
     currentPage = "RECORD"
     isRecording = true
+    motorState = false
+    setMotorSpeed(0) -- Останавливаем мотор при входе
     initialSnap = snapshotInventories()
     currentRecordingData = {
         inputs = {},
         outputs = {},
-        logs = { "Started recording..." }
+        logs = { "Recorder initialized. Motor set to 0 RPM." }
     }
     drawRecordPage()
 end
@@ -214,7 +248,6 @@ function processRecordingStep()
     local nowSnap = snapshotInventories()
 
     for devName, slots in pairs(nowSnap) do
-        -- Ищем короткое имя устройства
         local shortLabel = devName
         for l, n in pairs(devices) do
             if n == devName then shortLabel = l break end
@@ -236,10 +269,20 @@ function processRecordingStep()
     drawRecordPage()
 end
 
+function toggleMotor()
+    motorState = not motorState
+    if motorState then
+        setMotorSpeed(256)
+        table.insert(currentRecordingData.logs, "Motor turned ON (256 RPM)")
+    else
+        setMotorSpeed(0)
+        table.insert(currentRecordingData.logs, "Motor turned OFF (0 RPM)")
+    end
+    drawRecordPage()
+end
+
 function saveCurrentRecipe()
-    local finalSnap = snapshotInventories()
     local recipeName = "Recipe_" .. (#recipes + 1)
-    
     local newRecipe = {
         name = recipeName,
         output = currentRecordingData.output or "Process_Done",
@@ -250,44 +293,50 @@ function saveCurrentRecipe()
     saveRecipes()
 
     isRecording = false
+    motorState = false
+    setMotorSpeed(0)
     currentPage = "MAIN"
     drawMainPage()
 end
 
 ----------------------------------------------------
--- Главный цикл обработки событий
+-- Запуск и обработка нажатий на Мониторе
 ----------------------------------------------------
 drawMainPage()
 
 parallel.waitForAny(
-    -- 1. Клики по монитору
+    -- Обработка кликов на мониторе
     function()
         while true do
             local event, side, x, y = os.pullEvent("monitor_touch")
-            
+
             if currentPage == "MAIN" then
-                if y >= 19 and y <= 21 then
-                    if x >= 2 and x <= 26 then
+                if y >= 18 and y <= 21 then
+                    if x >= 2 and x <= 31 then
                         startRecording()
-                    elseif x >= 28 and x <= 48 then
+                    elseif x >= 34 and x <= 58 then
                         drawMainPage()
                     end
                 end
             elseif currentPage == "RECORD" then
-                if y >= 19 and y <= 21 then
-                    if x >= 2 and x <= 24 then
-                        saveCurrentRecipe()
-                    elseif x >= 26 and x <= 48 then
-                        isRecording = false
-                        currentPage = "MAIN"
-                        drawMainPage()
-                    end
+                -- Кнопка управления мотором (y: 14-16)
+                if y >= 14 and y <= 16 and x >= 2 and x <= 33 then
+                    toggleMotor()
+                -- Кнопка Сохранить (y: 20-22)
+                elseif y >= 20 and y <= 22 and x >= 2 and x <= 25 then
+                    saveCurrentRecipe()
+                -- Кнопка Отмена (y: 20-22)
+                elseif y >= 20 and y <= 22 and x >= 28 and x <= 51 then
+                    isRecording = false
+                    setMotorSpeed(0)
+                    currentPage = "MAIN"
+                    drawMainPage()
                 end
             end
         end
     end,
 
-    -- 2. Таймер обновления записи (каждую 1 секунду)
+    -- Таймер авто-обновления монитора (раз в 1 сек)
     function()
         while true do
             sleep(1)
