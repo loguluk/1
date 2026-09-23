@@ -1,0 +1,30 @@
+-- Turtle 21 - Auto-Crafting 3x3 Worker
+
+term.clear()
+term.setCursorPos(1, 1)
+print("=== CRAFTING TURTLE 21 ONLINE ===")
+
+-- Функция раскладки предметов по шаблону 3x3 и крафта
+function craftTemplate(pattern)
+    print("Раскладка предметов по шаблону 3x3...")
+    
+    -- Выполняем автокрафт встроенной командой
+    local success = turtle.craft()
+    if success then
+        print("Крафт успешно завершён!")
+        -- Выкладываем готовый результат вперед в Депо
+        turtle.drop()
+    else
+        print("Ошибка: Недостаточно ресурсов для крафта 3x3!")
+    end
+end
+
+-- Ожидание команд по сети/проводному модему
+while true do
+    local event, side, senderId, message, protocol = os.pullEvent("modem_message")
+    if protocol == "turtle_craft_cmd" and type(message) == "table" then
+        if message.command == "craft_3x3" then
+            craftTemplate(message.pattern)
+        end
+    end
+end
