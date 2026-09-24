@@ -1,5 +1,5 @@
 -- Turtle Client Agent v6.0 (turtle_21)
--- Fixed line 59: nil pushItems error
+-- Fixed line 59: Uses silo.pullItems instead of invalid turtle.pushItems
 
 local modem = peripheral.find("modem")
 local turtleName = nil
@@ -37,7 +37,7 @@ function scanGrid()
     return gridData
 end
 
--- Передача из слота черепашки в силос по сети
+-- Безопасная передача предметов из слота черепашки в свободный силос
 function safeStoreItem(slotIdx)
     local item = turtle.getItemDetail(slotIdx)
     if not item or item.count == 0 then return true end
@@ -46,7 +46,6 @@ function safeStoreItem(slotIdx)
         if peripheral.isPresent(siloName) then
             local silo = peripheral.wrap(siloName)
             if silo and silo.pullItems then
-                -- Вызываем pullItems СО СТОРОНЫ СИЛОСА (забираем из черепашки в силос)
                 local moved = silo.pullItems(turtleName or "turtle_21", slotIdx, item.count)
                 if moved and moved > 0 then
                     print(string.format("Stored %d x %s -> %s", moved, item.name:gsub(".*:", ""), siloName))
