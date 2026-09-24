@@ -1,5 +1,5 @@
--- Master Factory Controller v10.0
--- Full Integration with Item Silos & Rednet Turtle Agent
+-- Master Factory Controller v11.0
+-- Fixed line 119 nil-method error & Added Clickable Amount Selector
 
 local RECIPE_FILE = "recipes.json"
 
@@ -49,7 +49,7 @@ local selectedRecipeIdx = 1
 local orderAmount = 1
 
 ----------------------------------------------------
--- Загрузка и Сохранение
+-- Сохранение и Загрузка
 ----------------------------------------------------
 function loadRecipes()
     if fs.exists(RECIPE_FILE) then
@@ -68,7 +68,7 @@ end
 loadRecipes()
 
 ----------------------------------------------------
--- Сетевой обмен с Черепашкой
+-- Сетевое сканирование Rednet
 ----------------------------------------------------
 function requestTurtleScan()
     rednet.broadcast({ command = "SCAN" }, "factory_net")
@@ -100,12 +100,14 @@ function pullFromSiloToDevice(itemName, count, targetDevice, targetSlot)
     for _, siloName in ipairs(silos) do
         if peripheral.isPresent(siloName) and peripheral.isPresent(targetDevice) then
             local silo = peripheral.wrap(siloName)
-            local items = silo.list()
-            for slot, item in pairs(items) do
-                if item.name == itemName then
-                    local moved = silo.pushItems(targetDevice, slot, remaining, targetSlot)
-                    remaining = remaining - moved
-                    if remaining <= 0 then return true end
+            if silo and silo.list then
+                local items = silo.list()
+                for slot, item in pairs(items) do
+                    if item.name == itemName then
+                        local moved = silo.pushItems(targetDevice, slot, remaining, targetSlot)
+                        remaining = remaining - moved
+                        if remaining <= 0 then return true end
+                    end
                 end
             end
         end
@@ -116,17 +118,19 @@ end
 function pushDeviceToSilo(sourceDevice, slot)
     if not peripheral.isPresent(sourceDevice) then return false end
     local src = peripheral.wrap(sourceDevice)
-    for _, siloName in ipairs(silos) do
-        if peripheral.isPresent(siloName) then
-            local moved = src.pushItems(siloName, slot)
-            if moved > 0 then return true end
+    if src and src.pushItems then
+        for _, siloName in ipairs(silos) do
+            if peripheral.isPresent(siloName) then
+                local moved = src.pushItems(siloName, slot)
+                if moved > 0 then return true end
+            end
         end
     end
     return false
 end
 
 ----------------------------------------------------
--- Ручное сканирование рецепта
+-- Сканирование
 ----------------------------------------------------
 function scanCurrentRecipe()
     print("Requesting inventory scan from Turtle...")
@@ -146,7 +150,7 @@ function scanCurrentRecipe()
             name = item.name,
             count = item.count
         })
-        mainOutput = item.name .. "_crafted"
+        mainOutput = item.name:gsub(".*:", "") .. "_crafted"
     end
 
     if #ingredients > 0 then
@@ -165,7 +169,7 @@ function scanCurrentRecipe()
 end
 
 ----------------------------------------------------
--- Отрисовка UI
+-- UI
 ----------------------------------------------------
 function drawText(termObj, x, y, text, fg, bg)
     if not termObj then return end
@@ -221,25 +225,28 @@ function renderUI()
                 end
             end
 
-            -- Панель управления
+            -- Нижняя панель количества [-] [Qty] [+] [x10] [START] [DELETE]
             drawBox(t, 2, h - 5, w - 4, 3, colors.gray)
-            drawText(t, 3, h - 4, "Qty:", colors.white, colors.gray)
+            
+            drawBox(t, 3, h - 4, 3, 1, colors.red)
+            drawText(t, 4, h - 4, "-", colors.white, colors.red)
 
-            drawBox(t, 8, h - 4, 3, 1, colors.red)
-            drawText(t, 9, h - 4, "-", colors.white, colors.red)
-
-            drawText(t, 12, h - 4, string.format("%2d", orderAmount), colors.yellow, colors.gray)
+            drawBox(t, 7, h - 4, 7, 1, colors.black)
+            drawText(t, 8, h - 4, string.format("%3d pcs", orderAmount), colors.yellow, colors.black)
 
             drawBox(t, 15, h - 4, 3, 1, colors.green)
             drawText(t, 16, h - 4, "+", colors.white, colors.green)
 
-            drawBox(t, 20, h - 4, 11, 1, colors.lime)
-            drawText(t, 21, h - 4, "[ START ]", colors.black, colors.lime)
+            drawBox(t, 19, h - 4, 5, 1, colors.orange)
+            drawText(t, 20, h - 4, "+10", colors.white, colors.orange)
 
-            drawBox(t, 32, h - 4, 12, 1, colors.red)
-            drawText(t, 33, h - 4, "[ DELETE ]", colors.white, colors.red)
+            drawBox(t, 25, h - 4, 11, 1, colors.lime)
+            drawText(t, 26, h - 4, "[ START ]", colors.black, colors.lime)
 
-            -- Нижняя панель
+            drawBox(t, 37, h - 4, 10, 1, colors.red)
+            drawText(t, 38, h - 4, "[ DEL ]", colors.white, colors.red)
+
+            -- Системные кнопки
             local btnY = h - 1
             drawBox(t, 2, btnY, 14, 1, colors.purple)
             drawText(t, 3, btnY, "[ +RECIPE ]", colors.white, colors.purple)
@@ -249,8 +256,8 @@ function renderUI()
 
         elseif currentPage == "RECORD" then
             drawText(t, 2, 1, "=== RECORDER MODE ===", colors.red, colors.black)
-            drawText(t, 2, 3, "1. Place items in Turtle 21 inventory.", colors.yellow, colors.black)
-            drawText(t, 2, 4, "2. Press [ SCAN NOW ] button below.", colors.white, colors.black)
+            drawText(t, 2, 3, "1. Place items in Turtle 21 inventory slots.", colors.yellow, colors.black)
+            drawText(t, 2, 4, "2. Click [ SCAN NOW ] to save.", colors.white, colors.black)
 
             local btnY = h - 1
             drawBox(t, 2, btnY, 14, 1, colors.green)
@@ -263,7 +270,7 @@ function renderUI()
 end
 
 ----------------------------------------------------
--- Выполнение Крафта
+-- Выполнение крафта
 ----------------------------------------------------
 function executeCraft(recipe, count)
     setMotorSpeed(256)
@@ -287,7 +294,7 @@ function executeCraft(recipe, count)
 end
 
 ----------------------------------------------------
--- Обработка событий
+-- Главный цикл
 ----------------------------------------------------
 renderUI()
 
@@ -307,17 +314,25 @@ while true do
                 selectedRecipeIdx = y - 2
                 renderUI()
 
+            -- Выбор количества и управление [-] [Text] [+] [+10] [START] [DEL]
             elseif y == h - 4 then
-                if x >= 8 and x <= 10 and orderAmount > 1 then
+                if x >= 3 and x <= 5 and orderAmount > 1 then
                     orderAmount = orderAmount - 1
                     renderUI()
                 elseif x >= 15 and x <= 17 then
                     orderAmount = orderAmount + 1
                     renderUI()
-                elseif x >= 20 and x <= 30 and #recipes > 0 then
+                elseif x >= 19 and x <= 23 then
+                    orderAmount = orderAmount + 10
+                    renderUI()
+                elseif x >= 7 and x <= 13 then
+                    -- Клик по самому числу сбрасывает на 1
+                    orderAmount = 1
+                    renderUI()
+                elseif x >= 25 and x <= 35 and #recipes > 0 then
                     executeCraft(recipes[selectedRecipeIdx], orderAmount)
                     renderUI()
-                elseif x >= 32 and x <= 43 and #recipes > 0 then
+                elseif x >= 37 and x <= 46 and #recipes > 0 then
                     table.remove(recipes, selectedRecipeIdx)
                     if selectedRecipeIdx > #recipes then selectedRecipeIdx = math.max(1, #recipes) end
                     saveRecipes()
