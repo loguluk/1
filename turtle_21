@@ -1,5 +1,5 @@
--- Turtle Client Agent v4.0 (turtle_21)
--- Smart Silo Storing & Direct Cable Transfer (No Dropping)
+-- Turtle Client Agent v5.0 (turtle_21)
+-- Safe Storage Check (Zero Item Dropping)
 
 local modem = peripheral.find("modem")
 if modem then
@@ -33,34 +33,50 @@ function scanGrid()
     return gridData
 end
 
--- Поиск свободного силоса и отгрузка предметов по проводной сети
-function pushToAvailableSilo(turtleSlot)
+-- Безопасная отправка с предварительной проверкой свободного слота
+function safeStoreItem(slotIdx)
+    local item = turtle.getItemDetail(slotIdx)
+    if not item then return true end
+
     for _, siloName in ipairs(silos) do
         if peripheral.isPresent(siloName) then
             local silo = peripheral.wrap(siloName)
-            if silo and silo.pushItems then
-                -- pushItems возвращает количество успешно переданных предметов
-                local moved = turtle.pushItems(siloName, turtleSlot)
-                if moved > 0 then
-                    print(string.format("Moved %d items to %s", moved, siloName))
-                    if turtle.getItemCount(turtleSlot) == 0 then
-                        return true
+            if silo and silo.list then
+                -- Проверяем наличие слотов или совпадение предметов
+                local items = silo.list()
+                local size = silo.size and silo.size() or 27
+                
+                -- Ищем неполный стак или свободный слот
+                local targetSlot = nil
+                for s = 1, size do
+                    if not items[s] or (items[s].name == item.name and items[s].count < 64) then
+                        targetSlot = s
+                        break
+                    end
+                end
+
+                if targetSlot then
+                    local moved = turtle.pushItems(siloName, slotIdx, item.count, targetSlot)
+                    if moved > 0 then
+                        print(string.format("Safely stored %d x %s in %s (Slot %d)", moved, item.name:gsub(".*:", ""), siloName, targetSlot))
+                        if turtle.getItemCount(slotIdx) == 0 then
+                            return true
+                        end
                     end
                 end
             end
         end
     end
-    return turtle.getItemCount(turtleSlot) == 0
+
+    print(string.format("WARNING: No free space found in Silos for slot %d!", slotIdx))
+    return false
 end
 
-function clearAllSlotsToSilos()
+function safeClearAllSlots()
     for i = 1, 16 do
         if turtle.getItemCount(i) > 0 then
             turtle.select(i)
-            local success = pushToAvailableSilo(i)
-            if not success then
-                print(string.format("Warning: All Silos Full! Item left in slot %d", i))
-            end
+            safeStoreItem(i)
         end
     end
     turtle.select(1)
@@ -79,7 +95,7 @@ while true do
             rednet.send(senderId, { status = success and "OK" or "FAIL", err = err }, "factory_net")
 
         elseif message.command == "CLEAR_ALL" then
-            clearAllSlotsToSilos()
+            safeClearAllSlots()
             rednet.send(senderId, { status = "OK" }, "factory_net")
         end
     end
