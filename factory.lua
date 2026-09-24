@@ -1,5 +1,4 @@
--- Master Factory Controller v16.0
--- Instant Batch Delivery, Output Yield Counting & Auto Slot Clearing
+-- Master Factory Controller v17.0 (Instant Stack Batch Crafting)
 
 local RECIPE_FILE = "recipes.json"
 
@@ -102,10 +101,10 @@ function setMotorSpeed(speed)
 end
 
 ----------------------------------------------------
--- Доставка из Silo в Черепашку
+-- МГНОВЕННАЯ ПАКЕТНАЯ ДОСТАВКА ИЗ SILO (Сразу всю пачку)
 ----------------------------------------------------
-function pullFromSilosToTurtle(itemName, count, targetSlot)
-    local remaining = count
+function pullBatchFromSilosToTurtle(itemName, totalAmount, targetSlot)
+    local remaining = totalAmount
     for _, siloName in ipairs(silos) do
         if peripheral.isPresent(siloName) and peripheral.isPresent(devices.turtle) then
             local silo = peripheral.wrap(siloName)
@@ -113,19 +112,21 @@ function pullFromSilosToTurtle(itemName, count, targetSlot)
                 local items = silo.list()
                 for slot, item in pairs(items) do
                     if item.name == itemName then
+                        -- Передаем весь остаток ЗА ОДИН ВЫЗОВ (например, сразу 30 штук)
                         local moved = silo.pushItems(devices.turtle, slot, remaining, targetSlot)
                         remaining = remaining - moved
+                        print(string.format("Transferred %d x %s directly to Slot %d", moved, itemName:gsub(".*:", ""), targetSlot))
                         if remaining <= 0 then return true end
                     end
                 end
             end
         end
     end
-    return remaining < count
+    return remaining < totalAmount
 end
 
 ----------------------------------------------------
--- Логика Сканирования и Крафта
+-- Сканирование и Тестовый Крафт
 ----------------------------------------------------
 function startPreviewScan()
     print("Scanning Turtle slots...")
@@ -146,7 +147,7 @@ function startPreviewScan()
     end
 
     if #pendingIngredients == 0 then
-        print("Turtle grid is empty! Place ingredients first.")
+        print("Turtle grid is empty!")
         return false
     end
 
@@ -160,7 +161,6 @@ function confirmAndExecuteCraft()
     requestTurtleCraft()
     sleep(0.5)
 
-    -- Проверяем результат в слотах черепашки
     local afterGrid = requestTurtleScan()
     detectedYieldCount = 1
     detectedOutputItem = "Crafted_Result"
@@ -185,44 +185,43 @@ function confirmAndExecuteCraft()
     table.insert(recipes, newRecipe)
     saveRecipes()
 
-    -- Очищаем все слоты от скрафченного предмета
     requestTurtleClear()
-
     pendingIngredients = {}
     currentPage = "MAIN"
 end
 
+----------------------------------------------------
+-- ПОЛНЫЙ АВТОКРАФТ ПАЧКОЙ ЗА 1 ШАГ
+----------------------------------------------------
 function runFullCraftCycle(recipe, targetAmount)
     setMotorSpeed(256)
     local yieldPerCraft = recipe.yield or 1
     local totalCraftsNeeded = math.ceil(targetAmount / yieldPerCraft)
 
-    print(string.format("Start craft: %d x %s (Yield: %d per craft, Total crafts: %d)", 
-          targetAmount, recipe.output or "Item", yieldPerCraft, totalCraftsNeeded))
+    print(string.format("Instant Craft: %d x %s (Batches: %d)", targetAmount, recipe.output or "Item", totalCraftsNeeded))
 
-    -- Очистка слотов перед стартом
     requestTurtleClear()
 
-    for step = 1, totalCraftsNeeded do
-        -- 1. Загружаем ингредиенты с учетом запрашиваемого порционного количества
-        if recipe.ingredients then
-            for _, ing in ipairs(recipe.ingredients) do
-                pullFromSilosToTurtle(ing.name, ing.count, ing.slot)
-            end
+    -- 1. Передаем ВСЕ ингредиенты сразу пачкой для всего объема
+    if recipe.ingredients then
+        for _, ing in ipairs(recipe.ingredients) do
+            local batchNeeded = ing.count * totalCraftsNeeded
+            pullBatchFromSilosToTurtle(ing.name, batchNeeded, ing.slot)
         end
-
-        sleep(0.1)
-
-        -- 2. Запускаем крафт
-        requestTurtleCraft()
-
-        sleep(0.1)
-
-        -- 3. Забираем готовые предметы и остатки из слотов
-        requestTurtleClear()
     end
 
-    print("Auto-Craft Completed Successfully!")
+    sleep(0.2)
+
+    -- 2. Запускаем крафт всего стака за 1 команду!
+    print("Executing instant stack craft...")
+    requestTurtleCraft()
+
+    sleep(0.2)
+
+    -- 3. Мгновенно выгружаем весь скрафченный результат
+    requestTurtleClear()
+
+    print("Instant Auto-Craft Completed!")
 end
 
 ----------------------------------------------------
@@ -283,7 +282,7 @@ function renderUI()
                 end
             end
 
-            -- Панель количества
+            -- Панель настройки количества
             drawBox(t, 2, h - 5, w - 4, 3, colors.gray)
             
             drawBox(t, 3, h - 4, 3, 1, colors.red)
