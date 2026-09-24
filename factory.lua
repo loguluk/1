@@ -1,5 +1,5 @@
--- Master Factory Controller v12.0
--- Confirmation Dialog (YES/NO) for Crafted Result in Turtle Slot 1
+-- Master Factory Controller v13.0
+-- Fixed Instant Transition on Scan + Stack (64) / +30 Buttons
 
 local RECIPE_FILE = "recipes.json"
 
@@ -52,7 +52,7 @@ local pendingRecipe = nil
 local detectedOutputItem = "Unknown"
 
 ----------------------------------------------------
--- Загрузка и Сохранение
+-- Сохранение и Загрузка
 ----------------------------------------------------
 function loadRecipes()
     if fs.exists(RECIPE_FILE) then
@@ -96,14 +96,14 @@ function setMotorSpeed(speed)
 end
 
 ----------------------------------------------------
--- Логика Записи и Подтверждения
+-- Запись и Ожидание результата крафта
 ----------------------------------------------------
 function startRecipeScan()
-    print("Scanning Turtle grid...")
+    print("Scanning Turtle input grid...")
     local grid = requestTurtleScan()
     
     if not grid then
-        print("Error: Turtle 21 not responding!")
+        print("Error: Turtle 21 not responding via Rednet!")
         return false
     end
 
@@ -121,16 +121,18 @@ function startRecipeScan()
         return false
     end
 
-    print("Attempting test craft on Turtle...")
+    print("Executing test craft on Turtle...")
     requestTurtleCraft()
-    sleep(0.5)
+    
+    -- Ожидание 1 сек, чтобы крафт точно завершился
+    sleep(1.0)
 
-    -- Повторный скан для определения предмета в 1 слоте
+    -- Сканируем 1-й слот черепашки после крафта
     local afterGrid = requestTurtleScan()
     if afterGrid and afterGrid[1] then
         detectedOutputItem = afterGrid[1].name:gsub(".*:", "")
     else
-        detectedOutputItem = "Crafted_Item"
+        detectedOutputItem = "Crafted_Result"
     end
 
     pendingRecipe = {
@@ -155,7 +157,7 @@ function drawText(termObj, x, y, text, fg, bg)
 end
 
 function drawBox(termObj, x, y, w, h, bg)
-    if not termObj me.return end
+    if not termObj then return end
     termObj.setBackgroundColor(bg)
     for i = 0, h - 1 do
         termObj.setCursorPos(x, y + i)
@@ -200,7 +202,7 @@ function renderUI()
                 end
             end
 
-            -- Панель количества
+            -- Удобный селектор количества [-1] [Qty] [+1] [+10] [+30] [STACK]
             drawBox(t, 2, h - 5, w - 4, 3, colors.gray)
             
             drawBox(t, 3, h - 4, 3, 1, colors.red)
@@ -215,12 +217,19 @@ function renderUI()
             drawBox(t, 19, h - 4, 5, 1, colors.orange)
             drawText(t, 20, h - 4, "+10", colors.white, colors.orange)
 
-            drawBox(t, 25, h - 4, 11, 1, colors.lime)
-            drawText(t, 26, h - 4, "[ START ]", colors.black, colors.lime)
+            drawBox(t, 25, h - 4, 5, 1, colors.purple)
+            drawText(t, 26, h - 4, "+30", colors.white, colors.purple)
 
-            drawBox(t, 37, h - 4, 10, 1, colors.red)
-            drawText(t, 38, h - 4, "[ DEL ]", colors.white, colors.red)
+            drawBox(t, 31, h - 4, 7, 1, colors.blue)
+            drawText(t, 32, h - 4, "[STK]", colors.white, colors.blue)
 
+            drawBox(t, 39, h - 4, 9, 1, colors.lime)
+            drawText(t, 40, h - 4, "[CRAFT]", colors.black, colors.lime)
+
+            drawBox(t, 49, h - 4, 7, 1, colors.red)
+            drawText(t, 50, h - 4, "[DEL]", colors.white, colors.red)
+
+            -- Системная панель
             local btnY = h - 1
             drawBox(t, 2, btnY, 14, 1, colors.purple)
             drawText(t, 3, btnY, "[ +RECIPE ]", colors.white, colors.purple)
@@ -231,7 +240,7 @@ function renderUI()
         elseif currentPage == "RECORD" then
             drawText(t, 2, 1, "=== RECORDER MODE ===", colors.red, colors.black)
             drawText(t, 2, 3, "1. Place ingredients in Turtle 21 slots.", colors.yellow, colors.black)
-            drawText(t, 2, 4, "2. Click [ SCAN NOW ] to test craft.", colors.white, colors.black)
+            drawText(t, 2, 4, "2. Click [ SCAN NOW ] below.", colors.white, colors.black)
 
             local btnY = h - 1
             drawBox(t, 2, btnY, 14, 1, colors.green)
@@ -242,7 +251,7 @@ function renderUI()
 
         elseif currentPage == "CONFIRM" then
             drawText(t, 2, 1, "=== CONFIRM CRAFT RESULT ===", colors.yellow, colors.black)
-            drawText(t, 2, 3, "Detected Item in Slot 1:", colors.white, colors.black)
+            drawText(t, 2, 3, "Result in Turtle Slot 1:", colors.white, colors.black)
             drawText(t, 4, 4, "-> " .. detectedOutputItem, colors.lime, colors.black)
             drawText(t, 2, 6, "Is this the correct output item?", colors.yellow, colors.black)
 
@@ -257,7 +266,7 @@ function renderUI()
 end
 
 ----------------------------------------------------
--- Обработка событий
+-- Главный цикл
 ----------------------------------------------------
 renderUI()
 
@@ -277,6 +286,7 @@ while true do
                 selectedRecipeIdx = y - 2
                 renderUI()
 
+            -- Селектор количества [-1] [Text] [+1] [+10] [+30] [STK] [CRAFT] [DEL]
             elseif y == h - 4 then
                 if x >= 3 and x <= 5 and orderAmount > 1 then
                     orderAmount = orderAmount - 1
@@ -287,15 +297,20 @@ while true do
                 elseif x >= 19 and x <= 23 then
                     orderAmount = orderAmount + 10
                     renderUI()
+                elseif x >= 25 and x <= 29 then
+                    orderAmount = orderAmount + 30
+                    renderUI()
+                elseif x >= 31 and x <= 37 then
+                    orderAmount = 64
+                    renderUI()
                 elseif x >= 7 and x <= 13 then
                     orderAmount = 1
                     renderUI()
-                elseif x >= 25 and x <= 35 and #recipes > 0 then
-                    -- Старт крафта
+                elseif x >= 39 and x <= 47 and #recipes > 0 then
                     setMotorSpeed(256)
                     requestTurtleCraft()
                     renderUI()
-                elseif x >= 37 and x <= 46 and #recipes > 0 then
+                elseif x >= 49 and x <= 56 and #recipes > 0 then
                     table.remove(recipes, selectedRecipeIdx)
                     if selectedRecipeIdx > #recipes then selectedRecipeIdx = math.max(1, #recipes) end
                     saveRecipes()
@@ -326,7 +341,6 @@ while true do
         elseif currentPage == "CONFIRM" then
             if y >= h - 1 then
                 if x >= 2 and x <= 16 then
-                    -- Нажали YES: Сохраняем рецепт
                     if pendingRecipe then
                         table.insert(recipes, pendingRecipe)
                         saveRecipes()
@@ -334,7 +348,6 @@ while true do
                     currentPage = "MAIN"
                     renderUI()
                 elseif x >= 18 and x <= 32 then
-                    -- Нажали NO: Отмена сохранения
                     pendingRecipe = nil
                     currentPage = "MAIN"
                     renderUI()
