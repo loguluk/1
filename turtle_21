@@ -1,13 +1,9 @@
--- Turtle Client Agent v6.0 (turtle_21)
--- Fixed line 59: Uses silo.pullItems instead of invalid turtle.pushItems
+-- Turtle Client Agent v7.0 (turtle_21)
+-- Fixed Line 49: Universal Peripheral Call (No Silo/Name NIL Errors)
 
 local modem = peripheral.find("modem")
-local turtleName = nil
-
 if modem then
-    local modemName = peripheral.getName(modem)
-    rednet.open(modemName)
-    turtleName = modemName
+    rednet.open(peripheral.getName(modem))
 end
 
 print("=== TURTLE 21 CLIENT ONLINE ===")
@@ -37,34 +33,46 @@ function scanGrid()
     return gridData
 end
 
--- Безопасная передача предметов из слота черепашки в свободный силос
+-- Безопасная отправка предметов в силосы без вызова ошибок nil
 function safeStoreItem(slotIdx)
     local item = turtle.getItemDetail(slotIdx)
     if not item or item.count == 0 then return true end
 
+    -- Находим собственное имя устройства в сети
+    local myName = nil
+    for _, name in ipairs(peripheral.getNames()) do
+        if peripheral.getType(name) == "turtle" or name:find("turtle") then
+            myName = name
+            break
+        end
+    end
+
     for _, siloName in ipairs(silos) do
         if peripheral.isPresent(siloName) then
-            local silo = peripheral.wrap(siloName)
-            if silo and silo.pullItems then
-                local moved = silo.pullItems(turtleName or "turtle_21", slotIdx, item.count)
-                if moved and moved > 0 then
-                    print(string.format("Stored %d x %s -> %s", moved, item.name:gsub(".*:", ""), siloName))
-                    if turtle.getItemCount(slotIdx) == 0 then
-                        return true
-                    end
+            -- Используем безопасный вызов peripheral.call
+            local moved = 0
+            if myName then
+                moved = peripheral.call(siloName, "pullItems", myName, slotIdx, item.count) or 0
+            end
+
+            if moved > 0 then
+                print(string.format("Stored %d x %s -> %s", moved, item.name:gsub(".*:", ""), siloName))
+                if turtle.getItemCount(slotIdx) == 0 then
+                    return true
                 end
             end
         end
     end
 
-    print(string.format("Warning: No free silo space for slot %d", slotIdx))
-    return false
+    -- Если по проводу передать не удалось, безопасно сбрасываем вверх в воронку/суб-инвентарь
+    turtle.select(slotIdx)
+    turtle.dropUp()
+    return turtle.getItemCount(slotIdx) == 0
 end
 
 function safeClearAllSlots()
     for i = 1, 16 do
         if turtle.getItemCount(i) > 0 then
-            turtle.select(i)
             safeStoreItem(i)
         end
     end
