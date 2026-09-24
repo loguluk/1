@@ -1,5 +1,4 @@
--- Master Factory Controller v15.0
--- Reliable Silo Item Pulling & Multi-Slot Craft Execution
+-- Master Factory Controller v15.1 (Fixed Line 191 Syntax Error)
 
 local RECIPE_FILE = "recipes.json"
 
@@ -188,7 +187,7 @@ function runFullCraftCycle(recipe, amount)
         -- 1. Доставляем ингредиенты по слотам
         if recipe.ingredients then
             for _, ing in ipairs(recipe.ingredients) do
-                pullFromSiloToDevice or pullFromSilosToTurtle(ing.name, ing.count, ing.slot)
+                pullFromSilosToTurtle(ing.name, ing.count, ing.slot)
             end
         end
 
@@ -372,7 +371,6 @@ while true do
                     orderAmount = 1
                     renderUI()
                 elseif x >= 39 and x <= 47 and #recipes > 0 then
-                    -- Старт выполнения автокрафта
                     runFullCraftCycle(recipes[selectedRecipeIdx], orderAmount)
                     renderUI()
                 elseif x >= 49 and x <= 56 and #recipes > 0 then
