@@ -1,4 +1,5 @@
--- Master Factory Controller v17.0 (Instant Stack Batch Crafting)
+-- Master Factory Controller v18.0
+-- Smart Silo Storage Distribution & Cable Network Integration
 
 local RECIPE_FILE = "recipes.json"
 
@@ -90,7 +91,7 @@ end
 
 function requestTurtleClear()
     rednet.broadcast({ command = "CLEAR_ALL" }, "factory_net")
-    rednet.receive("factory_net", 2)
+    rednet.receive("factory_net", 3)
 end
 
 function setMotorSpeed(speed)
@@ -101,7 +102,7 @@ function setMotorSpeed(speed)
 end
 
 ----------------------------------------------------
--- МГНОВЕННАЯ ПАКЕТНАЯ ДОСТАВКА ИЗ SILO (Сразу всю пачку)
+-- Забор ингредиентов из силосов
 ----------------------------------------------------
 function pullBatchFromSilosToTurtle(itemName, totalAmount, targetSlot)
     local remaining = totalAmount
@@ -112,10 +113,9 @@ function pullBatchFromSilosToTurtle(itemName, totalAmount, targetSlot)
                 local items = silo.list()
                 for slot, item in pairs(items) do
                     if item.name == itemName then
-                        -- Передаем весь остаток ЗА ОДИН ВЫЗОВ (например, сразу 30 штук)
                         local moved = silo.pushItems(devices.turtle, slot, remaining, targetSlot)
                         remaining = remaining - moved
-                        print(string.format("Transferred %d x %s directly to Slot %d", moved, itemName:gsub(".*:", ""), targetSlot))
+                        print(string.format("Pulled %d x %s -> Slot %d", moved, itemName:gsub(".*:", ""), targetSlot))
                         if remaining <= 0 then return true end
                     end
                 end
@@ -126,7 +126,7 @@ function pullBatchFromSilosToTurtle(itemName, totalAmount, targetSlot)
 end
 
 ----------------------------------------------------
--- Сканирование и Тестовый Крафт
+-- Запись и Сохранение Рецепта
 ----------------------------------------------------
 function startPreviewScan()
     print("Scanning Turtle slots...")
@@ -156,7 +156,7 @@ function startPreviewScan()
 end
 
 function confirmAndExecuteCraft()
-    print("Executing test craft & calculating yield...")
+    print("Executing test craft & checking result...")
     setMotorSpeed(256)
     requestTurtleCraft()
     sleep(0.5)
@@ -185,24 +185,25 @@ function confirmAndExecuteCraft()
     table.insert(recipes, newRecipe)
     saveRecipes()
 
+    print("Returning finished product to free Silos...")
     requestTurtleClear()
+
     pendingIngredients = {}
     currentPage = "MAIN"
 end
 
 ----------------------------------------------------
--- ПОЛНЫЙ АВТОКРАФТ ПАЧКОЙ ЗА 1 ШАГ
+-- Цикл автокрафта
 ----------------------------------------------------
 function runFullCraftCycle(recipe, targetAmount)
     setMotorSpeed(256)
     local yieldPerCraft = recipe.yield or 1
     local totalCraftsNeeded = math.ceil(targetAmount / yieldPerCraft)
 
-    print(string.format("Instant Craft: %d x %s (Batches: %d)", targetAmount, recipe.output or "Item", totalCraftsNeeded))
+    print(string.format("Starting Craft: %d x %s", targetAmount, recipe.output or "Item"))
 
     requestTurtleClear()
 
-    -- 1. Передаем ВСЕ ингредиенты сразу пачкой для всего объема
     if recipe.ingredients then
         for _, ing in ipairs(recipe.ingredients) do
             local batchNeeded = ing.count * totalCraftsNeeded
@@ -212,16 +213,15 @@ function runFullCraftCycle(recipe, targetAmount)
 
     sleep(0.2)
 
-    -- 2. Запускаем крафт всего стака за 1 команду!
-    print("Executing instant stack craft...")
+    print("Executing craft...")
     requestTurtleCraft()
 
     sleep(0.2)
 
-    -- 3. Мгновенно выгружаем весь скрафченный результат
+    print("Storing output back into free Item Silos...")
     requestTurtleClear()
 
-    print("Instant Auto-Craft Completed!")
+    print("Auto-Craft Completed Successfully!")
 end
 
 ----------------------------------------------------
@@ -282,7 +282,6 @@ function renderUI()
                 end
             end
 
-            -- Панель настройки количества
             drawBox(t, 2, h - 5, w - 4, 3, colors.gray)
             
             drawBox(t, 3, h - 4, 3, 1, colors.red)
