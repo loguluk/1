@@ -1,4 +1,5 @@
--- Master Factory Controller v15.1 (Fixed Line 191 Syntax Error)
+-- Master Factory Controller v16.0
+-- Instant Batch Delivery, Output Yield Counting & Auto Slot Clearing
 
 local RECIPE_FILE = "recipes.json"
 
@@ -49,6 +50,7 @@ local orderAmount = 1
 
 local pendingIngredients = {}
 local detectedOutputItem = "Unknown"
+local detectedYieldCount = 1
 
 ----------------------------------------------------
 -- Сохранение и Загрузка
@@ -87,6 +89,11 @@ function requestTurtleCraft()
     return reply and reply.status == "OK"
 end
 
+function requestTurtleClear()
+    rednet.broadcast({ command = "CLEAR_ALL" }, "factory_net")
+    rednet.receive("factory_net", 2)
+end
+
 function setMotorSpeed(speed)
     if motorName and peripheral.isPresent(motorName) then
         local m = peripheral.wrap(motorName)
@@ -95,7 +102,7 @@ function setMotorSpeed(speed)
 end
 
 ----------------------------------------------------
--- Доставка предметов из Силосов в Черепашку
+-- Доставка из Silo в Черепашку
 ----------------------------------------------------
 function pullFromSilosToTurtle(itemName, count, targetSlot)
     local remaining = count
@@ -108,15 +115,11 @@ function pullFromSilosToTurtle(itemName, count, targetSlot)
                     if item.name == itemName then
                         local moved = silo.pushItems(devices.turtle, slot, remaining, targetSlot)
                         remaining = remaining - moved
-                        print(string.format("Moved %d x %s to Turtle Slot %d", moved, itemName:gsub(".*:", ""), targetSlot))
                         if remaining <= 0 then return true end
                     end
                 end
             end
         end
-    end
-    if remaining > 0 then
-        print(string.format("Warning: Missing %d x %s in Silos!", remaining, itemName:gsub(".*:", "")))
     end
     return remaining < count
 end
@@ -125,7 +128,7 @@ end
 -- Логика Сканирования и Крафта
 ----------------------------------------------------
 function startPreviewScan()
-    print("Scanning items in Turtle slots...")
+    print("Scanning Turtle slots...")
     local grid = requestTurtleScan()
     
     if not grid then
@@ -143,7 +146,7 @@ function startPreviewScan()
     end
 
     if #pendingIngredients == 0 then
-        print("Turtle grid is empty! Place items first.")
+        print("Turtle grid is empty! Place ingredients first.")
         return false
     end
 
@@ -152,57 +155,74 @@ function startPreviewScan()
 end
 
 function confirmAndExecuteCraft()
-    print("Executing test craft on Turtle...")
+    print("Executing test craft & calculating yield...")
     setMotorSpeed(256)
     requestTurtleCraft()
-    sleep(1.0)
+    sleep(0.5)
 
+    -- Проверяем результат в слотах черепашки
     local afterGrid = requestTurtleScan()
-    if afterGrid and afterGrid[1] then
-        detectedOutputItem = afterGrid[1].name:gsub(".*:", "")
-    else
-        detectedOutputItem = "Crafted_Result"
+    detectedYieldCount = 1
+    detectedOutputItem = "Crafted_Result"
+
+    if afterGrid then
+        for slot, item in pairs(afterGrid) do
+            if item and item.count > 0 then
+                detectedOutputItem = item.name:gsub(".*:", "")
+                detectedYieldCount = item.count
+                break
+            end
+        end
     end
 
     local newRecipe = {
         name = "Recipe #" .. (#recipes + 1),
         output = detectedOutputItem,
+        yield = detectedYieldCount,
         ingredients = pendingIngredients
     }
 
     table.insert(recipes, newRecipe)
     saveRecipes()
-    
+
+    -- Очищаем все слоты от скрафченного предмета
+    requestTurtleClear()
+
     pendingIngredients = {}
     currentPage = "MAIN"
 end
 
-function runFullCraftCycle(recipe, amount)
+function runFullCraftCycle(recipe, targetAmount)
     setMotorSpeed(256)
-    print(string.format("Starting Auto-Craft: %d x %s", amount, recipe.output or "Item"))
+    local yieldPerCraft = recipe.yield or 1
+    local totalCraftsNeeded = math.ceil(targetAmount / yieldPerCraft)
 
-    for step = 1, amount do
-        print(string.format("--- Crafting batch %d/%d ---", step, amount))
-        
-        -- 1. Доставляем ингредиенты по слотам
+    print(string.format("Start craft: %d x %s (Yield: %d per craft, Total crafts: %d)", 
+          targetAmount, recipe.output or "Item", yieldPerCraft, totalCraftsNeeded))
+
+    -- Очистка слотов перед стартом
+    requestTurtleClear()
+
+    for step = 1, totalCraftsNeeded do
+        -- 1. Загружаем ингредиенты с учетом запрашиваемого порционного количества
         if recipe.ingredients then
             for _, ing in ipairs(recipe.ingredients) do
                 pullFromSilosToTurtle(ing.name, ing.count, ing.slot)
             end
         end
 
-        sleep(0.3)
+        sleep(0.1)
 
-        -- 2. Запускаем команду крафта
-        local ok = requestTurtleCraft()
-        if not ok then
-            print("Craft command returned error on Turtle!")
-        end
+        -- 2. Запускаем крафт
+        requestTurtleCraft()
 
-        sleep(0.5)
+        sleep(0.1)
+
+        -- 3. Забираем готовые предметы и остатки из слотов
+        requestTurtleClear()
     end
 
-    print("Auto-Craft Cycle Complete!")
+    print("Auto-Craft Completed Successfully!")
 end
 
 ----------------------------------------------------
@@ -246,9 +266,10 @@ function renderUI()
                         local prefix = isSel and "> " or "  "
                         local bgCol = isSel and colors.gray or colors.black
                         local fgCol = isSel and colors.white or colors.cyan
+                        local yieldStr = (r.yield and r.yield > 1) and (" (x" .. r.yield .. ")") or ""
                         
                         drawBox(t, 2, 2 + i, w - 4, 1, bgCol)
-                        drawText(t, 2, 2 + i, prefix .. i .. ". " .. (r.output or "Item"), fgCol, bgCol)
+                        drawText(t, 2, 2 + i, prefix .. i .. ". " .. (r.output or "Item") .. yieldStr, fgCol, bgCol)
                     end
                 end
 
@@ -262,7 +283,7 @@ function renderUI()
                 end
             end
 
-            -- Нижняя панель быстрой настройки
+            -- Панель количества
             drawBox(t, 2, h - 5, w - 4, 3, colors.gray)
             
             drawBox(t, 3, h - 4, 3, 1, colors.red)
