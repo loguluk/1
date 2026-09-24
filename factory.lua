@@ -1,5 +1,4 @@
--- Factory Controller with Create Connected Item Silos Integration
--- Handles item pulling/pushing from Silos 94-101 and UI navigation
+-- Factory Controller (Direct Cable Transfer via Item Silo + Easy Quick-Craft Menu)
 
 local RECIPE_FILE = "recipes.json"
 local monitor = peripheral.find("monitor")
@@ -10,7 +9,7 @@ if monitor then
 end
 term.clear()
 
--- Список силосных башен хранилища
+-- Башни-силосы
 local silos = {
     "create_connected:item_silo_94",
     "create_connected:item_silo_95",
@@ -40,7 +39,7 @@ for _, name in ipairs(peripheral.getNames()) do
 end
 
 local recipes = {}
-local currentPage = "MAIN" -- "MAIN", "ORDER", "RECORD"
+local currentPage = "MAIN" -- "MAIN", "RECORD"
 local selectedRecipeIdx = 1
 local orderAmount = 1
 
@@ -64,18 +63,17 @@ end
 loadRecipes()
 
 ----------------------------------------------------
--- Работа с Item Silo (Хранилище)
+-- Передача предметов по проводам (без черепашки)
 ----------------------------------------------------
--- Забрать нужное количество предмета из Silo в Turtle
-function pullFromSilos(itemName, count, targetSlot)
+function pullFromSiloToDevice(itemName, count, targetDevice, targetSlot)
     local remaining = count
     for _, siloName in ipairs(silos) do
-        if peripheral.isPresent(siloName) then
+        if peripheral.isPresent(siloName) and peripheral.isPresent(targetDevice) then
             local silo = peripheral.wrap(siloName)
             local items = silo.list()
             for slot, item in pairs(items) do
                 if item.name == itemName then
-                    local moved = silo.pushItems(devices.turtle, slot, remaining, targetSlot)
+                    local moved = silo.pushItems(targetDevice, slot, remaining, targetSlot)
                     remaining = remaining - moved
                     if remaining <= 0 then return true end
                 end
@@ -85,21 +83,18 @@ function pullFromSilos(itemName, count, targetSlot)
     return remaining < count
 end
 
--- Отправить готовый предмет из Turtle в первое свободное Silo
-function pushToSilos(turtleSlot)
-    local turtleObj = peripheral.wrap(devices.turtle) or turtle
+function pushDeviceToSilo(sourceDevice, slot)
+    if not peripheral.isPresent(sourceDevice) then return false end
+    local src = peripheral.wrap(sourceDevice)
     for _, siloName in ipairs(silos) do
         if peripheral.isPresent(siloName) then
-            local moved = turtleObj.pushItems(siloName, turtleSlot)
+            local moved = src.pushItems(siloName, slot)
             if moved > 0 then return true end
         end
     end
     return false
 end
 
-----------------------------------------------------
--- Управление Мотором
-----------------------------------------------------
 function setMotorSpeed(speed)
     if motorName and peripheral.isPresent(motorName) then
         local m = peripheral.wrap(motorName)
@@ -137,93 +132,88 @@ function renderUI()
         local w, h = t.getSize()
 
         if currentPage == "MAIN" then
-            drawText(t, 2, 1, "=== FACTORY AUTO-CRAFT (ITEM SILO CONNECTED) ===", colors.yellow, colors.black)
-            drawText(t, 2, 2, "Select recipe to request:", colors.gray, colors.black)
+            drawText(t, 2, 1, "=== AUTO-FACTORY CONTROLLER ===", colors.yellow, colors.black)
 
+            -- Список рецептов
             if #recipes == 0 then
-                drawText(t, 4, 4, "No recipes found. Press [+RECIPE] to add.", colors.red, colors.black)
+                drawText(t, 2, 3, "No recipes found. Click [+RECIPE] to add.", colors.red, colors.black)
             else
                 for i, r in ipairs(recipes) do
-                    if i <= 8 then
+                    if i <= 6 then
                         local isSel = (i == selectedRecipeIdx)
                         local prefix = isSel and "> " or "  "
                         local bgCol = isSel and colors.gray or colors.black
                         local fgCol = isSel and colors.white or colors.cyan
                         
-                        drawBox(t, 2, 3 + i, w - 4, 1, bgCol)
-                        drawText(t, 2, 3 + i, prefix .. i .. ". " .. (r.output or "Item") .. " [Auto-Silo]", fgCol, bgCol)
+                        drawBox(t, 2, 2 + i, w - 4, 1, bgCol)
+                        drawText(t, 2, 2 + i, prefix .. i .. ". " .. (r.output or "Item"), fgCol, bgCol)
                     end
                 end
             end
 
+            -- Быстрая панель заказа прямо в Главном Меню
+            drawBox(t, 2, h - 5, w - 4, 3, colors.gray)
+            drawText(t, 4, h - 4, "Amount: ", colors.white, colors.gray)
+
+            drawBox(t, 12, h - 4, 3, 1, colors.red)
+            drawText(t, 13, h - 4, "-", colors.white, colors.red)
+
+            drawText(t, 16, h - 4, string.format("%2d pcs", orderAmount), colors.yellow, colors.gray)
+
+            drawBox(t, 23, h - 4, 3, 1, colors.green)
+            drawText(t, 24, h - 4, "+", colors.white, colors.green)
+
+            drawBox(t, 28, h - 4, 14, 1, colors.lime)
+            drawText(t, 29, h - 4, "[ START ]", colors.black, colors.lime)
+
+            -- Нижняя системная панель
             local btnY = h - 1
-            drawBox(t, 2, btnY, 14, 1, colors.blue)
-            drawText(t, 3, btnY, "[ CRAFT ]", colors.white, colors.blue)
-
-            drawBox(t, 18, btnY, 14, 1, colors.purple)
-            drawText(t, 19, btnY, "[ +RECIPE ]", colors.white, colors.purple)
-
-        elseif currentPage == "ORDER" then
-            local r = recipes[selectedRecipeIdx]
-            drawText(t, 2, 1, "=== ORDER ITEM ===", colors.yellow, colors.black)
-            drawText(t, 2, 3, "Output: " .. (r.output or "Unknown"), colors.cyan, colors.black)
-            drawText(t, 2, 5, "Select amount:", colors.white, colors.black)
-
-            drawBox(t, 4, 7, 5, 1, colors.red)
-            drawText(t, 6, 7, "-", colors.white, colors.red)
-
-            drawText(t, 11, 7, tostring(orderAmount) .. " pcs", colors.yellow, colors.black)
-
-            drawBox(t, 20, 7, 5, 1, colors.green)
-            drawText(t, 22, 7, "+", colors.white, colors.green)
-
-            local btnY = h - 1
-            drawBox(t, 2, btnY, 14, 1, colors.lime)
-            drawText(t, 4, btnY, "[ START ]", colors.black, colors.lime)
+            drawBox(t, 2, btnY, 14, 1, colors.purple)
+            drawText(t, 3, btnY, "[ +RECIPE ]", colors.white, colors.purple)
 
             drawBox(t, 18, btnY, 14, 1, colors.gray)
-            drawText(t, 20, btnY, "[ CANCEL ]", colors.white, colors.gray)
+            drawText(t, 20, btnY, "[ REFRESH ]", colors.white, colors.gray)
 
         elseif currentPage == "RECORD" then
             drawText(t, 2, 1, "=== RECORDER MODE ===", colors.red, colors.black)
-            drawText(t, 2, 3, "Setup items in Crafting Turtle...", colors.gray, colors.black)
+            drawText(t, 2, 3, "Put items into Turtle grid (3x3) or Depots.", colors.yellow, colors.black)
+            drawText(t, 2, 5, "Motor is stopped for recording.", colors.gray, colors.black)
 
             local btnY = h - 1
             drawBox(t, 2, btnY, 14, 1, colors.blue)
             drawText(t, 4, btnY, "[ SAVE ]", colors.white, colors.blue)
 
-            drawBox(t, 18, btnY, 14, 1, colors.gray)
-            drawText(t, 20, btnY, "[ CANCEL ]", colors.white, colors.gray)
+            drawBox(t, 18, btnY, 14, 1, colors.red)
+            drawText(t, 20, btnY, "[ CANCEL ]", colors.white, colors.red)
         end
     end
 end
 
 ----------------------------------------------------
--- Выполнение Автокрафта
+-- Запуск крафта
 ----------------------------------------------------
 function executeCraft(recipe, count)
     setMotorSpeed(256)
-    print("Pulling ingredients from Item Silos...")
+    print("Pulling components from Item Silos via wires...")
 
     if recipe.grid3x3 then
         for slot, item in pairs(recipe.grid3x3) do
-            pullFromSilos(item.name, item.count * count, slot)
+            pullFromSiloToDevice(item.name, item.count * count, devices.turtle, slot)
         end
     end
 
-    print("Crafting process running...")
+    print("Executing process...")
     sleep(1.0)
 
-    -- Отправка результата обратно в Silo
-    print("Storing finished items back into Item Silos...")
+    print("Returning finished product to Item Silos...")
     for slot = 1, 16 do
-        pushToSilos(slot)
+        pushDeviceToSilo(devices.turtle, slot)
     end
-    print("Done!")
+    print("Craft complete!")
 end
 
 ----------------------------------------------------
--- Обработка Кликов
+-- Главный цикл обработки
 ----------------------------------------------------
 renderUI()
 
@@ -239,47 +229,39 @@ while true do
         end
 
         if currentPage == "MAIN" then
-            if y >= 4 and y <= 3 + #recipes then
-                selectedRecipeIdx = y - 3
+            -- Выбор рецепта
+            if y >= 3 and y <= 2 + math.min(#recipes, 6) then
+                selectedRecipeIdx = y - 2
                 renderUI()
-            elseif y >= h - 1 then
-                if x >= 2 and x <= 16 and #recipes > 0 then
-                    currentPage = "ORDER"
-                    orderAmount = 1
+
+            -- Кнопки заказа [-] [+] [START]
+            elseif y == h - 4 then
+                if x >= 12 and x <= 14 and orderAmount > 1 then
+                    orderAmount = orderAmount - 1
                     renderUI()
-                elseif x >= 18 and x <= 32 then
+                elseif x >= 23 and x <= 25 then
+                    orderAmount = orderAmount + 1
+                    renderUI()
+                elseif x >= 28 and x <= 42 and #recipes > 0 then
+                    executeCraft(recipes[selectedRecipeIdx], orderAmount)
+                    renderUI()
+                end
+
+            -- Нижние кнопки [+RECIPE] [REFRESH]
+            elseif y >= h - 1 then
+                if x >= 2 and x <= 16 then
                     currentPage = "RECORD"
                     setMotorSpeed(0)
                     renderUI()
-                end
-            end
-
-        elseif currentPage == "ORDER" then
-            if y == 7 then
-                if x >= 4 and x <= 9 and orderAmount > 1 then
-                    orderAmount = orderAmount - 1
-                    renderUI()
-                elseif x >= 20 and x <= 25 then
-                    orderAmount = orderAmount + 1
-                    renderUI()
-                end
-            elseif y >= h - 1 then
-                if x >= 2 and x <= 16 then
-                    -- Старт
-                    executeCraft(recipes[selectedRecipeIdx], orderAmount)
-                    currentPage = "MAIN"
-                    renderUI()
                 elseif x >= 18 and x <= 32 then
-                    -- Отмена (Гарантированный возврат)
-                    currentPage = "MAIN"
                     renderUI()
                 end
             end
 
         elseif currentPage == "RECORD" then
+            -- Принудительный CANCEL / SAVE
             if y >= h - 1 then
                 if x >= 2 and x <= 16 then
-                    -- Сохранить
                     table.insert(recipes, {
                         name = "Recipe_" .. (#recipes + 1),
                         output = "Crafted_Item_" .. (#recipes + 1),
@@ -289,7 +271,7 @@ while true do
                     currentPage = "MAIN"
                     renderUI()
                 elseif x >= 18 and x <= 32 then
-                    -- Отмена (Гарантированный возврат)
+                    -- Мгновенная отмена и возврат в главное меню
                     currentPage = "MAIN"
                     renderUI()
                 end
