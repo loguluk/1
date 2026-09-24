@@ -1,5 +1,5 @@
--- Turtle Client Agent (turtle_21)
--- Save as startup.lua on the Crafting Turtle!
+-- Turtle Client Agent v3.0 (turtle_21)
+-- Instant Multi-Slot Clearing & Craft Execution
 
 local modem = peripheral.find("modem")
 if modem then
@@ -22,6 +22,16 @@ function scanGrid()
     return gridData
 end
 
+function clearAllSlots()
+    for i = 1, 16 do
+        if turtle.getItemCount(i) > 0 then
+            turtle.select(i)
+            turtle.dropUp() -- Сбрасывает вверх в воронку / трубу / хранилище
+        end
+    end
+    turtle.select(1)
+end
+
 while true do
     local senderId, message, protocol = rednet.receive("factory_net")
     if type(message) == "table" then
@@ -32,22 +42,10 @@ while true do
         elseif message.command == "CRAFT" then
             turtle.select(1)
             local success, err = turtle.craft()
-            if not success then
-                print("Craft failed: " .. tostring(err))
-            else
-                print("Craft success!")
-            end
             rednet.send(senderId, { status = success and "OK" or "FAIL", err = err }, "factory_net")
 
-        elseif message.command == "CLEAR_SLOTS" then
-            -- Сброс предметов из инвентаря
-            for i = 1, 16 do
-                if turtle.getItemCount(i) > 0 then
-                    turtle.select(i)
-                    turtle.dropUp()
-                end
-            end
-            turtle.select(1)
+        elseif message.command == "CLEAR_ALL" then
+            clearAllSlots()
             rednet.send(senderId, { status = "OK" }, "factory_net")
         end
     end
