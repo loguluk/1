@@ -1,5 +1,5 @@
--- Master Factory Controller v11.0
--- Fixed line 119 nil-method error & Added Clickable Amount Selector
+-- Master Factory Controller v12.0
+-- Confirmation Dialog (YES/NO) for Crafted Result in Turtle Slot 1
 
 local RECIPE_FILE = "recipes.json"
 
@@ -44,12 +44,15 @@ for _, name in ipairs(peripheral.getNames()) do
 end
 
 local recipes = {}
-local currentPage = "MAIN" -- "MAIN", "RECORD"
+local currentPage = "MAIN" -- "MAIN", "RECORD", "CONFIRM"
 local selectedRecipeIdx = 1
 local orderAmount = 1
 
+local pendingRecipe = nil
+local detectedOutputItem = "Unknown"
+
 ----------------------------------------------------
--- Сохранение и Загрузка
+-- Загрузка и Сохранение
 ----------------------------------------------------
 function loadRecipes()
     if fs.exists(RECIPE_FILE) then
@@ -68,7 +71,7 @@ end
 loadRecipes()
 
 ----------------------------------------------------
--- Сетевое сканирование Rednet
+-- Сетевой обмен Rednet
 ----------------------------------------------------
 function requestTurtleScan()
     rednet.broadcast({ command = "SCAN" }, "factory_net")
@@ -85,9 +88,6 @@ function requestTurtleCraft()
     return reply and reply.status == "OK"
 end
 
-----------------------------------------------------
--- Перемещение предметов по проводам (Silos)
-----------------------------------------------------
 function setMotorSpeed(speed)
     if motorName and peripheral.isPresent(motorName) then
         local m = peripheral.wrap(motorName)
@@ -95,81 +95,56 @@ function setMotorSpeed(speed)
     end
 end
 
-function pullFromSiloToDevice(itemName, count, targetDevice, targetSlot)
-    local remaining = count
-    for _, siloName in ipairs(silos) do
-        if peripheral.isPresent(siloName) and peripheral.isPresent(targetDevice) then
-            local silo = peripheral.wrap(siloName)
-            if silo and silo.list then
-                local items = silo.list()
-                for slot, item in pairs(items) do
-                    if item.name == itemName then
-                        local moved = silo.pushItems(targetDevice, slot, remaining, targetSlot)
-                        remaining = remaining - moved
-                        if remaining <= 0 then return true end
-                    end
-                end
-            end
-        end
-    end
-    return remaining < count
-end
-
-function pushDeviceToSilo(sourceDevice, slot)
-    if not peripheral.isPresent(sourceDevice) then return false end
-    local src = peripheral.wrap(sourceDevice)
-    if src and src.pushItems then
-        for _, siloName in ipairs(silos) do
-            if peripheral.isPresent(siloName) then
-                local moved = src.pushItems(siloName, slot)
-                if moved > 0 then return true end
-            end
-        end
-    end
-    return false
-end
-
 ----------------------------------------------------
--- Сканирование
+-- Логика Записи и Подтверждения
 ----------------------------------------------------
-function scanCurrentRecipe()
-    print("Requesting inventory scan from Turtle...")
+function startRecipeScan()
+    print("Scanning Turtle grid...")
     local grid = requestTurtleScan()
     
     if not grid then
-        print("Error: Turtle 21 not responding via Rednet!")
+        print("Error: Turtle 21 not responding!")
         return false
     end
 
     local ingredients = {}
-    local mainOutput = "Unknown Output"
-
     for slot, item in pairs(grid) do
         table.insert(ingredients, {
             slot = slot,
             name = item.name,
             count = item.count
         })
-        mainOutput = item.name:gsub(".*:", "") .. "_crafted"
     end
 
-    if #ingredients > 0 then
-        table.insert(recipes, {
-            name = "Recipe #" .. (#recipes + 1),
-            output = mainOutput,
-            ingredients = ingredients
-        })
-        saveRecipes()
-        print("Recipe successfully recorded!")
-        return true
-    else
-        print("No items detected in Turtle grid!")
+    if #ingredients == 0 then
+        print("Turtle grid is empty!")
         return false
     end
+
+    print("Attempting test craft on Turtle...")
+    requestTurtleCraft()
+    sleep(0.5)
+
+    -- Повторный скан для определения предмета в 1 слоте
+    local afterGrid = requestTurtleScan()
+    if afterGrid and afterGrid[1] then
+        detectedOutputItem = afterGrid[1].name:gsub(".*:", "")
+    else
+        detectedOutputItem = "Crafted_Item"
+    end
+
+    pendingRecipe = {
+        name = "Recipe #" .. (#recipes + 1),
+        output = detectedOutputItem,
+        ingredients = ingredients
+    }
+
+    currentPage = "CONFIRM"
+    return true
 end
 
 ----------------------------------------------------
--- UI
+-- Отрисовка UI
 ----------------------------------------------------
 function drawText(termObj, x, y, text, fg, bg)
     if not termObj then return end
@@ -180,7 +155,7 @@ function drawText(termObj, x, y, text, fg, bg)
 end
 
 function drawBox(termObj, x, y, w, h, bg)
-    if not termObj then return end
+    if not termObj me.return end
     termObj.setBackgroundColor(bg)
     for i = 0, h - 1 do
         termObj.setCursorPos(x, y + i)
@@ -225,7 +200,7 @@ function renderUI()
                 end
             end
 
-            -- Нижняя панель количества [-] [Qty] [+] [x10] [START] [DELETE]
+            -- Панель количества
             drawBox(t, 2, h - 5, w - 4, 3, colors.gray)
             
             drawBox(t, 3, h - 4, 3, 1, colors.red)
@@ -246,7 +221,6 @@ function renderUI()
             drawBox(t, 37, h - 4, 10, 1, colors.red)
             drawText(t, 38, h - 4, "[ DEL ]", colors.white, colors.red)
 
-            -- Системные кнопки
             local btnY = h - 1
             drawBox(t, 2, btnY, 14, 1, colors.purple)
             drawText(t, 3, btnY, "[ +RECIPE ]", colors.white, colors.purple)
@@ -256,8 +230,8 @@ function renderUI()
 
         elseif currentPage == "RECORD" then
             drawText(t, 2, 1, "=== RECORDER MODE ===", colors.red, colors.black)
-            drawText(t, 2, 3, "1. Place items in Turtle 21 inventory slots.", colors.yellow, colors.black)
-            drawText(t, 2, 4, "2. Click [ SCAN NOW ] to save.", colors.white, colors.black)
+            drawText(t, 2, 3, "1. Place ingredients in Turtle 21 slots.", colors.yellow, colors.black)
+            drawText(t, 2, 4, "2. Click [ SCAN NOW ] to test craft.", colors.white, colors.black)
 
             local btnY = h - 1
             drawBox(t, 2, btnY, 14, 1, colors.green)
@@ -265,36 +239,25 @@ function renderUI()
 
             drawBox(t, 18, btnY, 14, 1, colors.red)
             drawText(t, 20, btnY, "[ CANCEL ]", colors.white, colors.red)
+
+        elseif currentPage == "CONFIRM" then
+            drawText(t, 2, 1, "=== CONFIRM CRAFT RESULT ===", colors.yellow, colors.black)
+            drawText(t, 2, 3, "Detected Item in Slot 1:", colors.white, colors.black)
+            drawText(t, 4, 4, "-> " .. detectedOutputItem, colors.lime, colors.black)
+            drawText(t, 2, 6, "Is this the correct output item?", colors.yellow, colors.black)
+
+            local btnY = h - 1
+            drawBox(t, 2, btnY, 14, 1, colors.green)
+            drawText(t, 4, btnY, "[ YES / SAVE ]", colors.black, colors.green)
+
+            drawBox(t, 18, btnY, 14, 1, colors.red)
+            drawText(t, 20, btnY, "[ NO / CANCEL ]", colors.white, colors.red)
         end
     end
 end
 
 ----------------------------------------------------
--- Выполнение крафта
-----------------------------------------------------
-function executeCraft(recipe, count)
-    setMotorSpeed(256)
-    print("Pulling ingredients from Item Silos...")
-
-    if recipe.ingredients then
-        for _, ing in ipairs(recipe.ingredients) do
-            pullFromSiloToDevice(ing.name, ing.count * count, devices.turtle, ing.slot)
-        end
-    end
-
-    print("Executing craft command via Rednet...")
-    requestTurtleCraft()
-    sleep(0.5)
-
-    print("Returning finished products to Item Silos...")
-    for slot = 1, 16 do
-        pushDeviceToSilo(devices.turtle, slot)
-    end
-    print("Crafting cycle finished!")
-end
-
-----------------------------------------------------
--- Главный цикл
+-- Обработка событий
 ----------------------------------------------------
 renderUI()
 
@@ -314,7 +277,6 @@ while true do
                 selectedRecipeIdx = y - 2
                 renderUI()
 
-            -- Выбор количества и управление [-] [Text] [+] [+10] [START] [DEL]
             elseif y == h - 4 then
                 if x >= 3 and x <= 5 and orderAmount > 1 then
                     orderAmount = orderAmount - 1
@@ -326,11 +288,12 @@ while true do
                     orderAmount = orderAmount + 10
                     renderUI()
                 elseif x >= 7 and x <= 13 then
-                    -- Клик по самому числу сбрасывает на 1
                     orderAmount = 1
                     renderUI()
                 elseif x >= 25 and x <= 35 and #recipes > 0 then
-                    executeCraft(recipes[selectedRecipeIdx], orderAmount)
+                    -- Старт крафта
+                    setMotorSpeed(256)
+                    requestTurtleCraft()
                     renderUI()
                 elseif x >= 37 and x <= 46 and #recipes > 0 then
                     table.remove(recipes, selectedRecipeIdx)
@@ -352,11 +315,27 @@ while true do
         elseif currentPage == "RECORD" then
             if y >= h - 1 then
                 if x >= 2 and x <= 16 then
-                    if scanCurrentRecipe() then
-                        currentPage = "MAIN"
-                    end
+                    startRecipeScan()
                     renderUI()
                 elseif x >= 18 and x <= 32 then
+                    currentPage = "MAIN"
+                    renderUI()
+                end
+            end
+
+        elseif currentPage == "CONFIRM" then
+            if y >= h - 1 then
+                if x >= 2 and x <= 16 then
+                    -- Нажали YES: Сохраняем рецепт
+                    if pendingRecipe then
+                        table.insert(recipes, pendingRecipe)
+                        saveRecipes()
+                    end
+                    currentPage = "MAIN"
+                    renderUI()
+                elseif x >= 18 and x <= 32 then
+                    -- Нажали NO: Отмена сохранения
+                    pendingRecipe = nil
                     currentPage = "MAIN"
                     renderUI()
                 end
