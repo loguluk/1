@@ -1,5 +1,5 @@
--- Turtle Client Agent v3.0 (turtle_21)
--- Instant Multi-Slot Clearing & Craft Execution
+-- Turtle Client Agent v4.0 (turtle_21)
+-- Smart Silo Storing & Direct Cable Transfer (No Dropping)
 
 local modem = peripheral.find("modem")
 if modem then
@@ -7,6 +7,17 @@ if modem then
 end
 
 print("=== TURTLE 21 CLIENT ONLINE ===")
+
+local silos = {
+    "create_connected:item_silo_94",
+    "create_connected:item_silo_95",
+    "create_connected:item_silo_96",
+    "create_connected:item_silo_97",
+    "create_connected:item_silo_98",
+    "create_connected:item_silo_101",
+    "create_connected:item_silo_100",
+    "create_connected:item_silo_99"
+}
 
 function scanGrid()
     local gridData = {}
@@ -22,11 +33,34 @@ function scanGrid()
     return gridData
 end
 
-function clearAllSlots()
+-- Поиск свободного силоса и отгрузка предметов по проводной сети
+function pushToAvailableSilo(turtleSlot)
+    for _, siloName in ipairs(silos) do
+        if peripheral.isPresent(siloName) then
+            local silo = peripheral.wrap(siloName)
+            if silo and silo.pushItems then
+                -- pushItems возвращает количество успешно переданных предметов
+                local moved = turtle.pushItems(siloName, turtleSlot)
+                if moved > 0 then
+                    print(string.format("Moved %d items to %s", moved, siloName))
+                    if turtle.getItemCount(turtleSlot) == 0 then
+                        return true
+                    end
+                end
+            end
+        end
+    end
+    return turtle.getItemCount(turtleSlot) == 0
+end
+
+function clearAllSlotsToSilos()
     for i = 1, 16 do
         if turtle.getItemCount(i) > 0 then
             turtle.select(i)
-            turtle.dropUp() -- Сбрасывает вверх в воронку / трубу / хранилище
+            local success = pushToAvailableSilo(i)
+            if not success then
+                print(string.format("Warning: All Silos Full! Item left in slot %d", i))
+            end
         end
     end
     turtle.select(1)
@@ -45,7 +79,7 @@ while true do
             rednet.send(senderId, { status = success and "OK" or "FAIL", err = err }, "factory_net")
 
         elseif message.command == "CLEAR_ALL" then
-            clearAllSlots()
+            clearAllSlotsToSilos()
             rednet.send(senderId, { status = "OK" }, "factory_net")
         end
     end
