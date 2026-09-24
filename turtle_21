@@ -1,30 +1,47 @@
--- Turtle 21 - Auto-Crafting 3x3 Worker
+-- Turtle Client Agent (turtle_21)
+-- Install as startup.lua on the Crafting Turtle!
 
-term.clear()
-term.setCursorPos(1, 1)
-print("=== CRAFTING TURTLE 21 ONLINE ===")
-
--- Функция раскладки предметов по шаблону 3x3 и крафта
-function craftTemplate(pattern)
-    print("Раскладка предметов по шаблону 3x3...")
-    
-    -- Выполняем автокрафт встроенной командой
-    local success = turtle.craft()
-    if success then
-        print("Крафт успешно завершён!")
-        -- Выкладываем готовый результат вперед в Депо
-        turtle.drop()
-    else
-        print("Ошибка: Недостаточно ресурсов для крафта 3x3!")
-    end
+local modem = peripheral.find("modem")
+if modem then
+    rednet.open(peripheral.getName(modem))
 end
 
--- Ожидание команд по сети/проводному модему
+print("=== TURTLE 21 CLIENT ONLINE ===")
+
+function scanGrid()
+    local gridData = {}
+    for slot = 1, 16 do
+        local detail = turtle.getItemDetail(slot)
+        if detail then
+            gridData[slot] = {
+                name = detail.name,
+                count = detail.count
+            }
+        end
+    end
+    return gridData
+end
+
 while true do
-    local event, side, senderId, message, protocol = os.pullEvent("modem_message")
-    if protocol == "turtle_craft_cmd" and type(message) == "table" then
-        if message.command == "craft_3x3" then
-            craftTemplate(message.pattern)
+    local senderId, message, protocol = rednet.receive("factory_net")
+    if type(message) == "table" then
+        if message.command == "SCAN" then
+            local data = scanGrid()
+            rednet.send(senderId, { status = "OK", grid = data }, "factory_net")
+
+        elseif message.command == "CRAFT" then
+            turtle.select(1)
+            local success, err = turtle.craft()
+            rednet.send(senderId, { status = success and "OK" or "FAIL", err = err }, "factory_net")
+
+        elseif message.command == "DROP_ALL" then
+            for i = 1, 16 do
+                if turtle.getItemCount(i) > 0 then
+                    turtle.select(i)
+                    turtle.dropUp() -- Сбрасывает вверх/в сундук/силос
+                end
+            end
+            rednet.send(senderId, { status = "OK" }, "factory_net")
         end
     end
 end
