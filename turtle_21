@@ -1,9 +1,13 @@
--- Turtle Client Agent v5.0 (turtle_21)
--- Safe Storage Check (Zero Item Dropping)
+-- Turtle Client Agent v6.0 (turtle_21)
+-- Fixed line 59: nil pushItems error
 
 local modem = peripheral.find("modem")
+local turtleName = nil
+
 if modem then
-    rednet.open(peripheral.getName(modem))
+    local modemName = peripheral.getName(modem)
+    rednet.open(modemName)
+    turtleName = modemName
 end
 
 print("=== TURTLE 21 CLIENT ONLINE ===")
@@ -33,42 +37,28 @@ function scanGrid()
     return gridData
 end
 
--- Безопасная отправка с предварительной проверкой свободного слота
+-- Передача из слота черепашки в силос по сети
 function safeStoreItem(slotIdx)
     local item = turtle.getItemDetail(slotIdx)
-    if not item then return true end
+    if not item or item.count == 0 then return true end
 
     for _, siloName in ipairs(silos) do
         if peripheral.isPresent(siloName) then
             local silo = peripheral.wrap(siloName)
-            if silo and silo.list then
-                -- Проверяем наличие слотов или совпадение предметов
-                local items = silo.list()
-                local size = silo.size and silo.size() or 27
-                
-                -- Ищем неполный стак или свободный слот
-                local targetSlot = nil
-                for s = 1, size do
-                    if not items[s] or (items[s].name == item.name and items[s].count < 64) then
-                        targetSlot = s
-                        break
-                    end
-                end
-
-                if targetSlot then
-                    local moved = turtle.pushItems(siloName, slotIdx, item.count, targetSlot)
-                    if moved > 0 then
-                        print(string.format("Safely stored %d x %s in %s (Slot %d)", moved, item.name:gsub(".*:", ""), siloName, targetSlot))
-                        if turtle.getItemCount(slotIdx) == 0 then
-                            return true
-                        end
+            if silo and silo.pullItems then
+                -- Вызываем pullItems СО СТОРОНЫ СИЛОСА (забираем из черепашки в силос)
+                local moved = silo.pullItems(turtleName or "turtle_21", slotIdx, item.count)
+                if moved and moved > 0 then
+                    print(string.format("Stored %d x %s -> %s", moved, item.name:gsub(".*:", ""), siloName))
+                    if turtle.getItemCount(slotIdx) == 0 then
+                        return true
                     end
                 end
             end
         end
     end
 
-    print(string.format("WARNING: No free space found in Silos for slot %d!", slotIdx))
+    print(string.format("Warning: No free silo space for slot %d", slotIdx))
     return false
 end
 
