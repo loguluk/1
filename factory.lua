@@ -1,5 +1,5 @@
--- Master Factory Controller v14.0
--- Step-by-Step Recording: Scan -> Preview & Confirm -> Execute Craft & Save
+-- Master Factory Controller v15.0
+-- Reliable Silo Item Pulling & Multi-Slot Craft Execution
 
 local RECIPE_FILE = "recipes.json"
 
@@ -96,7 +96,34 @@ function setMotorSpeed(speed)
 end
 
 ----------------------------------------------------
--- Этап 1: Предварительное сканирование слотов
+-- Доставка предметов из Силосов в Черепашку
+----------------------------------------------------
+function pullFromSilosToTurtle(itemName, count, targetSlot)
+    local remaining = count
+    for _, siloName in ipairs(silos) do
+        if peripheral.isPresent(siloName) and peripheral.isPresent(devices.turtle) then
+            local silo = peripheral.wrap(siloName)
+            if silo and silo.list then
+                local items = silo.list()
+                for slot, item in pairs(items) do
+                    if item.name == itemName then
+                        local moved = silo.pushItems(devices.turtle, slot, remaining, targetSlot)
+                        remaining = remaining - moved
+                        print(string.format("Moved %d x %s to Turtle Slot %d", moved, itemName:gsub(".*:", ""), targetSlot))
+                        if remaining <= 0 then return true end
+                    end
+                end
+            end
+        end
+    end
+    if remaining > 0 then
+        print(string.format("Warning: Missing %d x %s in Silos!", remaining, itemName:gsub(".*:", "")))
+    end
+    return remaining < count
+end
+
+----------------------------------------------------
+-- Логика Сканирования и Крафта
 ----------------------------------------------------
 function startPreviewScan()
     print("Scanning items in Turtle slots...")
@@ -125,16 +152,12 @@ function startPreviewScan()
     return true
 end
 
-----------------------------------------------------
--- Этап 2: Подтверждение, Крафт и Сохранение
-----------------------------------------------------
 function confirmAndExecuteCraft()
-    print("Executing craft command on Turtle...")
+    print("Executing test craft on Turtle...")
     setMotorSpeed(256)
     requestTurtleCraft()
     sleep(1.0)
 
-    -- Проверяем результат в 1-м слоте после крафта
     local afterGrid = requestTurtleScan()
     if afterGrid and afterGrid[1] then
         detectedOutputItem = afterGrid[1].name:gsub(".*:", "")
@@ -153,6 +176,34 @@ function confirmAndExecuteCraft()
     
     pendingIngredients = {}
     currentPage = "MAIN"
+end
+
+function runFullCraftCycle(recipe, amount)
+    setMotorSpeed(256)
+    print(string.format("Starting Auto-Craft: %d x %s", amount, recipe.output or "Item"))
+
+    for step = 1, amount do
+        print(string.format("--- Crafting batch %d/%d ---", step, amount))
+        
+        -- 1. Доставляем ингредиенты по слотам
+        if recipe.ingredients then
+            for _, ing in ipairs(recipe.ingredients) do
+                pullFromSiloToDevice or pullFromSilosToTurtle(ing.name, ing.count, ing.slot)
+            end
+        end
+
+        sleep(0.3)
+
+        -- 2. Запускаем команду крафта
+        local ok = requestTurtleCraft()
+        if not ok then
+            print("Craft command returned error on Turtle!")
+        end
+
+        sleep(0.5)
+    end
+
+    print("Auto-Craft Cycle Complete!")
 end
 
 ----------------------------------------------------
@@ -212,7 +263,7 @@ function renderUI()
                 end
             end
 
-            -- Панель количества
+            -- Нижняя панель быстрой настройки
             drawBox(t, 2, h - 5, w - 4, 3, colors.gray)
             
             drawBox(t, 3, h - 4, 3, 1, colors.red)
@@ -268,7 +319,7 @@ function renderUI()
                 end
             end
 
-            drawText(t, 2, 10, "Is this correct? Click START CRAFT to execute.", colors.yellow, colors.black)
+            drawText(t, 2, 10, "Click START CRAFT to execute test craft & save.", colors.yellow, colors.black)
 
             local btnY = h - 1
             drawBox(t, 2, btnY, 22, 1, colors.green)
@@ -321,8 +372,8 @@ while true do
                     orderAmount = 1
                     renderUI()
                 elseif x >= 39 and x <= 47 and #recipes > 0 then
-                    setMotorSpeed(256)
-                    requestTurtleCraft()
+                    -- Старт выполнения автокрафта
+                    runFullCraftCycle(recipes[selectedRecipeIdx], orderAmount)
                     renderUI()
                 elseif x >= 49 and x <= 56 and #recipes > 0 then
                     table.remove(recipes, selectedRecipeIdx)
