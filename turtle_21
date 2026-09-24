@@ -1,5 +1,5 @@
 -- Turtle Client Agent (turtle_21)
--- Install as startup.lua on the Crafting Turtle!
+-- Install as startup.lua on Crafting Turtle (ID 104)
 
 local modem = peripheral.find("modem")
 if modem then
@@ -38,7 +38,7 @@ while true do
             for i = 1, 16 do
                 if turtle.getItemCount(i) > 0 then
                     turtle.select(i)
-                    turtle.dropUp() -- Сбрасывает вверх/в сундук/силос
+                    turtle.dropUp()
                 end
             end
             rednet.send(senderId, { status = "OK" }, "factory_net")
