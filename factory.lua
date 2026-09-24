@@ -1,5 +1,5 @@
--- Master Factory Controller v18.0
--- Smart Silo Storage Distribution & Cable Network Integration
+-- Master Factory Controller v18.1
+-- Safe Batch Delivery & Non-Dropping Storage Handler
 
 local RECIPE_FILE = "recipes.json"
 
@@ -115,7 +115,7 @@ function pullBatchFromSilosToTurtle(itemName, totalAmount, targetSlot)
                     if item.name == itemName then
                         local moved = silo.pushItems(devices.turtle, slot, remaining, targetSlot)
                         remaining = remaining - moved
-                        print(string.format("Pulled %d x %s -> Slot %d", moved, itemName:gsub(".*:", ""), targetSlot))
+                        print(string.format("Pulled %d x %s -> Turtle Slot %d", moved, itemName:gsub(".*:", ""), targetSlot))
                         if remaining <= 0 then return true end
                     end
                 end
@@ -185,7 +185,7 @@ function confirmAndExecuteCraft()
     table.insert(recipes, newRecipe)
     saveRecipes()
 
-    print("Returning finished product to free Silos...")
+    print("Safely storing output into available Silos...")
     requestTurtleClear()
 
     pendingIngredients = {}
@@ -218,7 +218,7 @@ function runFullCraftCycle(recipe, targetAmount)
 
     sleep(0.2)
 
-    print("Storing output back into free Item Silos...")
+    print("Safely returning output to free Silos...")
     requestTurtleClear()
 
     print("Auto-Craft Completed Successfully!")
