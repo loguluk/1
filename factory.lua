@@ -1,5 +1,5 @@
--- Master Factory Controller v13.0
--- Fixed Instant Transition on Scan + Stack (64) / +30 Buttons
+-- Master Factory Controller v14.0
+-- Step-by-Step Recording: Scan -> Preview & Confirm -> Execute Craft & Save
 
 local RECIPE_FILE = "recipes.json"
 
@@ -48,7 +48,7 @@ local currentPage = "MAIN" -- "MAIN", "RECORD", "CONFIRM"
 local selectedRecipeIdx = 1
 local orderAmount = 1
 
-local pendingRecipe = nil
+local pendingIngredients = {}
 local detectedOutputItem = "Unknown"
 
 ----------------------------------------------------
@@ -96,10 +96,10 @@ function setMotorSpeed(speed)
 end
 
 ----------------------------------------------------
--- Запись и Ожидание результата крафта
+-- Этап 1: Предварительное сканирование слотов
 ----------------------------------------------------
-function startRecipeScan()
-    print("Scanning Turtle input grid...")
+function startPreviewScan()
+    print("Scanning items in Turtle slots...")
     local grid = requestTurtleScan()
     
     if not grid then
@@ -107,27 +107,34 @@ function startRecipeScan()
         return false
     end
 
-    local ingredients = {}
+    pendingIngredients = {}
     for slot, item in pairs(grid) do
-        table.insert(ingredients, {
+        table.insert(pendingIngredients, {
             slot = slot,
             name = item.name,
             count = item.count
         })
     end
 
-    if #ingredients == 0 then
-        print("Turtle grid is empty!")
+    if #pendingIngredients == 0 then
+        print("Turtle grid is empty! Place items first.")
         return false
     end
 
-    print("Executing test craft on Turtle...")
+    currentPage = "CONFIRM"
+    return true
+end
+
+----------------------------------------------------
+-- Этап 2: Подтверждение, Крафт и Сохранение
+----------------------------------------------------
+function confirmAndExecuteCraft()
+    print("Executing craft command on Turtle...")
+    setMotorSpeed(256)
     requestTurtleCraft()
-    
-    -- Ожидание 1 сек, чтобы крафт точно завершился
     sleep(1.0)
 
-    -- Сканируем 1-й слот черепашки после крафта
+    -- Проверяем результат в 1-м слоте после крафта
     local afterGrid = requestTurtleScan()
     if afterGrid and afterGrid[1] then
         detectedOutputItem = afterGrid[1].name:gsub(".*:", "")
@@ -135,14 +142,17 @@ function startRecipeScan()
         detectedOutputItem = "Crafted_Result"
     end
 
-    pendingRecipe = {
+    local newRecipe = {
         name = "Recipe #" .. (#recipes + 1),
         output = detectedOutputItem,
-        ingredients = ingredients
+        ingredients = pendingIngredients
     }
 
-    currentPage = "CONFIRM"
-    return true
+    table.insert(recipes, newRecipe)
+    saveRecipes()
+    
+    pendingIngredients = {}
+    currentPage = "MAIN"
 end
 
 ----------------------------------------------------
@@ -202,7 +212,7 @@ function renderUI()
                 end
             end
 
-            -- Удобный селектор количества [-1] [Qty] [+1] [+10] [+30] [STACK]
+            -- Панель количества
             drawBox(t, 2, h - 5, w - 4, 3, colors.gray)
             
             drawBox(t, 3, h - 4, 3, 1, colors.red)
@@ -229,7 +239,6 @@ function renderUI()
             drawBox(t, 49, h - 4, 7, 1, colors.red)
             drawText(t, 50, h - 4, "[DEL]", colors.white, colors.red)
 
-            -- Системная панель
             local btnY = h - 1
             drawBox(t, 2, btnY, 14, 1, colors.purple)
             drawText(t, 3, btnY, "[ +RECIPE ]", colors.white, colors.purple)
@@ -240,7 +249,7 @@ function renderUI()
         elseif currentPage == "RECORD" then
             drawText(t, 2, 1, "=== RECORDER MODE ===", colors.red, colors.black)
             drawText(t, 2, 3, "1. Place ingredients in Turtle 21 slots.", colors.yellow, colors.black)
-            drawText(t, 2, 4, "2. Click [ SCAN NOW ] below.", colors.white, colors.black)
+            drawText(t, 2, 4, "2. Click [ SCAN NOW ] to preview ingredients.", colors.white, colors.black)
 
             local btnY = h - 1
             drawBox(t, 2, btnY, 14, 1, colors.green)
@@ -250,17 +259,23 @@ function renderUI()
             drawText(t, 20, btnY, "[ CANCEL ]", colors.white, colors.red)
 
         elseif currentPage == "CONFIRM" then
-            drawText(t, 2, 1, "=== CONFIRM CRAFT RESULT ===", colors.yellow, colors.black)
-            drawText(t, 2, 3, "Result in Turtle Slot 1:", colors.white, colors.black)
-            drawText(t, 4, 4, "-> " .. detectedOutputItem, colors.lime, colors.black)
-            drawText(t, 2, 6, "Is this the correct output item?", colors.yellow, colors.black)
+            drawText(t, 2, 1, "=== CONFIRM INGREDIENTS ===", colors.yellow, colors.black)
+            drawText(t, 2, 3, "Detected Items in Slots:", colors.white, colors.black)
+
+            for i, ing in ipairs(pendingIngredients) do
+                if i <= 5 then
+                    drawText(t, 4, 3 + i, string.format("Slot %d: %dx %s", ing.slot, ing.count, ing.name:gsub(".*:", "")), colors.lime, colors.black)
+                end
+            end
+
+            drawText(t, 2, 10, "Is this correct? Click START CRAFT to execute.", colors.yellow, colors.black)
 
             local btnY = h - 1
-            drawBox(t, 2, btnY, 14, 1, colors.green)
-            drawText(t, 4, btnY, "[ YES / SAVE ]", colors.black, colors.green)
+            drawBox(t, 2, btnY, 22, 1, colors.green)
+            drawText(t, 3, btnY, "[ START CRAFT & SAVE ]", colors.black, colors.green)
 
-            drawBox(t, 18, btnY, 14, 1, colors.red)
-            drawText(t, 20, btnY, "[ NO / CANCEL ]", colors.white, colors.red)
+            drawBox(t, 26, btnY, 14, 1, colors.red)
+            drawText(t, 28, btnY, "[ CANCEL ]", colors.white, colors.red)
         end
     end
 end
@@ -286,7 +301,6 @@ while true do
                 selectedRecipeIdx = y - 2
                 renderUI()
 
-            -- Селектор количества [-1] [Text] [+1] [+10] [+30] [STK] [CRAFT] [DEL]
             elseif y == h - 4 then
                 if x >= 3 and x <= 5 and orderAmount > 1 then
                     orderAmount = orderAmount - 1
@@ -330,7 +344,7 @@ while true do
         elseif currentPage == "RECORD" then
             if y >= h - 1 then
                 if x >= 2 and x <= 16 then
-                    startRecipeScan()
+                    startPreviewScan()
                     renderUI()
                 elseif x >= 18 and x <= 32 then
                     currentPage = "MAIN"
@@ -340,15 +354,11 @@ while true do
 
         elseif currentPage == "CONFIRM" then
             if y >= h - 1 then
-                if x >= 2 and x <= 16 then
-                    if pendingRecipe then
-                        table.insert(recipes, pendingRecipe)
-                        saveRecipes()
-                    end
-                    currentPage = "MAIN"
+                if x >= 2 and x <= 24 then
+                    confirmAndExecuteCraft()
                     renderUI()
-                elseif x >= 18 and x <= 32 then
-                    pendingRecipe = nil
+                elseif x >= 26 and x <= 40 then
+                    pendingIngredients = {}
                     currentPage = "MAIN"
                     renderUI()
                 end
