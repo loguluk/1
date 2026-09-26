@@ -1,44 +1,32 @@
 local thrusters = {
-    ["Спереди-Слева (4)"]   = peripheral.wrap("liquid_vector_thruster_4"),
-    ["Сзади-Слева (5)"]    = peripheral.wrap("liquid_vector_thruster_5"),
-    ["Спереди-Справа (6)"]  = peripheral.wrap("liquid_vector_thruster_6"),
-    ["Сзади-Справа (7)"]   = peripheral.wrap("liquid_vector_thruster_7")
+    ["Front-Left (4)"]  = peripheral.wrap("liquid_vector_thruster_4"),
+    ["Back-Left (5)"]   = peripheral.wrap("liquid_vector_thruster_5"),
+    ["Front-Right (6)"] = peripheral.wrap("liquid_vector_thruster_6"),
+    ["Back-Right (7)"]  = peripheral.wrap("liquid_vector_thruster_7")
 }
 
-print("=== ТЕСТ ОРИЕНТАЦИИ ДВИГАТЕЛЕЙ ===")
-print("Сбрасываем все векторы в 0...")
+print("=== FORWARD VECTOR TEST ===")
+print("Setting all thrusters MAX FORWARD (Y = 1.0)...")
 
 for name, t in pairs(thrusters) do
-    if t then t.setVector(0, 0) end
+    if t then
+        -- Set Y to 1.0 (Maximum Forward tilt)
+        t.setVector(0, 1.0)
+        print("Set " .. name .. " -> FORWARD [0, 1.0]")
+    else
+        print("ERROR: " .. name .. " NOT FOUND!")
+    end
 end
 
+print("\nAll thrusters are now set to MAX FORWARD.")
+print("Check each engine with Wrench if needed!")
+print("Press ENTER to reset back to normal [0, 0]...")
+read()
+
 for name, t in pairs(thrusters) do
-    if not t then
-        print("ОШИБКА: " .. name .. " не найден!")
-    else
-        print("\nПроверяем: " .. name)
-        
-        -- 1. Сброс в 0
-        t.setVector(0, 0)
-        print("  -> Вектор [0, 0]. Смотри: сопло смотрит СТРОГО ВНИЗ?")
-        print("  (Нажми Enter для теста оси X)")
-        read()
-
-        -- 2. Тест оси X (+0.8)
-        t.setVector(0.8, 0)
-        print("  -> Подали setVectorX(0.8). Сопло отклонилось ВПРАВО?")
-        print("  (Нажми Enter для теста оси Y)")
-        read()
-
-        -- 3. Тест оси Y (+0.8)
-        t.setVector(0, 0.8)
-        print("  -> Подали setVectorY(0.8). Сопло отклонилось ВПЕРЁД?")
-        print("  (Нажми Enter, чтобы перейти к следующему)")
-        read()
-
-        -- Возвращаем в 0
+    if t then
         t.setVector(0, 0)
     end
 end
 
-print("\nТест завершён! Все сопла возвращены в [0, 0].")
+print("Reset complete! Thrusters back to [0, 0].")
