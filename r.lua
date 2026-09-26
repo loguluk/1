@@ -1,7 +1,23 @@
--- Прямое подключение датчиков по сторонам компьютера и сетевых двигателей
-local gyro = peripheral.wrap("back") or peripheral.wrap("gimbal_sensor")
-local altimeter = peripheral.wrap("front") or peripheral.wrap("altitude_sensor")
+-- Функция универсального поиска периферии
+local function findPeripheral(side_name, type_pattern)
+    -- 1. Проверяем прямую сторону компьютера
+    if peripheral.isPresent(side_name) then
+        return peripheral.wrap(side_name), side_name
+    end
+    -- 2. Если на стороне нет, ищем по всей сети
+    for _, name in ipairs(peripheral.getNames()) do
+        if name:find(type_pattern) then
+            return peripheral.wrap(name), name
+        end
+    end
+    return nil, nil
+end
 
+-- Поиск датчиков
+local gyro, gyro_id = findPeripheral("back", "gimbal")
+local altimeter, alt_id = findPeripheral("front", "altitude")
+
+-- Подключение двигателей
 local thrusters = {
     FL = peripheral.wrap("liquid_vector_thruster_8"), -- Front-Left
     BL = peripheral.wrap("liquid_vector_thruster_9"), -- Back-Left
@@ -10,10 +26,15 @@ local thrusters = {
 }
 
 print("=== STARTING AUTOPILOT ===")
-print("Gyroscope (back): " .. (gyro and "OK" or "NOT FOUND!"))
-print("Altimeter (front): " .. (altimeter and "OK" or "NOT FOUND!"))
+print("Gyroscope: " .. (gyro_id and ("OK (" .. gyro_id .. ")") or "NOT FOUND!"))
+print("Altimeter: " .. (alt_id and ("OK (" .. alt_id .. ")") or "NOT FOUND!"))
 
--- 1. Включение моторов и запуск тяги
+-- Подаём редстоун-сигнал во все стороны для включения питания/блоков
+for _, side in ipairs(rs.getSides()) do
+    rs.setOutput(side, true)
+end
+
+-- Включение моторов и запуск тяги
 print("Enabling thrust on all engines...")
 for name, t in pairs(thrusters) do
     if t then
@@ -21,6 +42,7 @@ for name, t in pairs(thrusters) do
         if t.setPower then t.setPower(1.0) end
         if t.setThrottle then t.setThrottle(1.0) end
         if t.setEnabled then t.setEnabled(true) end
+        if t.setActive then t.setActive(true) end
         print("Engine " .. name .. " ENABLED.")
     else
         print("WARNING: Engine " .. name .. " NOT CONNECTED!")
@@ -41,14 +63,14 @@ while true do
         current_steer = 0.0
         print(string.format("[0-10s] FLYING STRAIGHT | Time: %.1fs", elapsed))
     else
-        -- После 10 секунд начинаем плавно повертать вправо
+        -- После 10 секунд начинаем плавно поворачивать вправо
         if current_steer < 0.3 then
-            current_steer = current_steer + 0.01 -- Плавность разворота
+            current_steer = current_steer + 0.01
         end
         print(string.format("[>10s] TURNING RIGHT | Steer: %.2f | Time: %.1fs", current_steer, elapsed))
     end
 
-    -- Чтение гироскопа для компенсации наклона
+    -- Чтение гироскопа для автоматического выравнивания
     local pitch_corr = 0
     local roll_corr = 0
 
@@ -56,7 +78,6 @@ while true do
         local pitch = (gyro.getPitch and gyro.getPitch()) or 0
         local roll = (gyro.getRoll and gyro.getRoll()) or 0
 
-        -- Автоматическое выравнивание
         pitch_corr = -pitch * 0.02
         roll_corr = -roll * 0.02
     end
