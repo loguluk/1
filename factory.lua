@@ -1,5 +1,5 @@
--- Master Factory Controller v19.0
--- Full Create Integration: Deployer Hand Scan, Press/Mixer Depots & Motor RPM Control
+-- Master Factory Controller v20.0
+-- Fixed Line 115/119 nil-errors, Auto Device Detection & Motor Speed Buttons
 
 local RECIPE_FILE = "recipes.json"
 
@@ -43,9 +43,8 @@ local orderAmount = 1
 local currentMotorSpeed = 256
 
 local pendingIngredients = {}
-local pendingDevice = "TURTLE"
+local pendingDeviceType = "TURTLE"
 local detectedOutputItem = "Unknown"
-local detectedYieldCount = 1
 
 ----------------------------------------------------
 -- Сохранение и Загрузка
@@ -72,16 +71,16 @@ loadRecipes()
 function setMotorSpeed(speed)
     currentMotorSpeed = speed
     if peripheral.isPresent(devices.motor) then
-        local m = peripheral.wrap(devices.motor)
-        if m and m.setSpeed then
-            m.setSpeed(speed)
-            print("Motor speed set to: " .. speed .. " RPM")
+        local ok, m = pcall(peripheral.wrap, devices.motor)
+        if ok and m and m.setSpeed then
+            pcall(m.setSpeed, speed)
+            print("Motor 5 RPM updated to: " .. speed)
         end
     end
 end
 
 ----------------------------------------------------
--- Сетевые вызовы и работа с инвентарями
+-- Сетевой обмен Rednet
 ----------------------------------------------------
 function requestTurtleScan()
     rednet.broadcast({ command = "SCAN" }, "factory_net")
@@ -98,73 +97,74 @@ end
 
 function requestTurtleClear()
     rednet.broadcast({ command = "CLEAR_ALL" }, "factory_net")
-    rednet.receive("factory_net", 3)
+    rednet.receive("factory_net", 2)
 end
 
 ----------------------------------------------------
--- Сканирование Руки (Deployer #9) и Депо/Чаш
+-- Безопасный скан периферии Create (Без ошибок nil)
 ----------------------------------------------------
-function scanDeviceInventory(deviceName)
+function safeGetDeviceItem(deviceName)
     if not peripheral.isPresent(deviceName) then return nil end
-    local dev = peripheral.wrap(deviceName)
-    if not dev then return nil end
+    local ok, dev = pcall(peripheral.wrap, deviceName)
+    if not ok or not dev then return nil end
 
-    local items = {}
     if dev.getItemDetail then
-        -- Проверка руки Deployer или одиночного слота
-        local detail = dev.getItemDetail(1) or dev.getItemDetail()
-        if detail then
-            table.insert(items, { name = detail.name, count = detail.count, slot = 1 })
-        end
-    elseif dev.list then
-        local list = dev.list()
-        for slot, item in pairs(list) do
-            table.insert(items, { name = item.name, count = item.count, slot = slot })
+        local okDetail, detail = pcall(dev.getItemDetail, 1)
+        if okDetail and detail then return detail end
+    end
+    if dev.list then
+        local okList, list = pcall(dev.list)
+        if okList and list then
+            for slot, item in pairs(list) do
+                return item
+            end
         end
     end
-    return items
+    return nil
 end
 
 ----------------------------------------------------
--- Сканирование и подготовка рецепта
+-- АВТОМАТИЧЕСКОЕ СКАНИРОВАНИЕ ВСЕХ МЕХАНИЗМОВ
 ----------------------------------------------------
-function startPreviewScan(deviceType)
-    pendingDevice = deviceType or "TURTLE"
+function startAutoScanAll()
     pendingIngredients = {}
+    pendingDeviceType = "UNKNOWN"
 
-    if pendingDevice == "TURTLE" then
-        local grid = requestTurtleScan()
-        if not grid then
-            print("Error: Turtle 21 not responding!")
-            return false
-        end
-        for slot, item in pairs(grid) do
+    -- 1. Сканируем Черепашку
+    local turtleGrid = requestTurtleScan()
+    if turtleGrid and next(turtleGrid) then
+        pendingDeviceType = "TURTLE"
+        for slot, item in pairs(turtleGrid) do
             table.insert(pendingIngredients, { slot = slot, name = item.name, count = item.count })
         end
-
-    elseif pendingDevice == "DEPLOYER" then
-        -- Сканируем предмет в Руке (Deployer 9) + Предмет на Депо 16
-        local handItem = scanDeviceInventory(devices.deployer)
-        local depotItem = scanDeviceInventory(devices.depotArm)
-
-        if handItem and #handItem > 0 then
-            table.insert(pendingIngredients, { role = "hand", name = handItem[1].name, count = handItem[1].count })
+    else
+        -- 2. Сканируем Руку (Deployer) и её Депо
+        local handItem = safeGetDeviceItem(devices.deployer)
+        local depotArmItem = safeGetDeviceItem(devices.depotArm)
+        
+        if handItem or depotArmItem then
+            pendingDeviceType = "DEPLOYER"
+            if handItem then table.insert(pendingIngredients, { role = "hand", name = handItem.name, count = handItem.count }) end
+            if depotArmItem then table.insert(pendingIngredients, { role = "depot", name = depotArmItem.name, count = depotArmItem.count }) end
+        else
+            -- 3. Сканируем Депо Пресса
+            local pressItem = safeGetDeviceItem(devices.depotPress)
+            if pressItem then
+                pendingDeviceType = "PRESS"
+                table.insert(pendingIngredients, { role = "press_depot", name = pressItem.name, count = pressItem.count })
+            else
+                -- 4. Сканируем Чашу Миксера
+                local mixerItem = safeGetDeviceItem(devices.basinMixer) or safeGetDeviceItem(devices.basinPress)
+                if mixerItem then
+                    pendingDeviceType = "MIXER"
+                    table.insert(pendingIngredients, { role = "basin", name = mixerItem.name, count = mixerItem.count })
+                end
+            end
         end
-        if depotItem and #depotItem > 0 then
-            table.insert(pendingIngredients, { role = "depot", name = depotItem[1].name, count = depotItem[1].count })
-        end
-
-    elseif pendingDevice == "PRESS" then
-        local depotItem = scanDeviceInventory(devices.depotPress)
-        if depotItem then pendingIngredients = depotItem end
-
-    elseif pendingDevice == "MIXER" then
-        local basinItem = scanDeviceInventory(devices.basinMixer)
-        if basinItem then pendingIngredients = basinItem end
     end
 
     if #pendingIngredients == 0 then
-        print("No items detected in " .. pendingDevice .. "!")
+        print("No items found on any machine!")
         return false
     end
 
@@ -173,10 +173,11 @@ function startPreviewScan(deviceType)
 end
 
 function confirmAndSaveRecipe()
+    local mainName = pendingIngredients[1] and pendingIngredients[1].name:gsub(".*:", "") or "Crafted_Item"
     local newRecipe = {
         name = "Recipe #" .. (#recipes + 1),
-        device = pendingDevice,
-        output = pendingIngredients[1] and pendingIngredients[1].name:gsub(".*:", "") or "Crafted_Item",
+        device = pendingDeviceType,
+        output = mainName,
         yield = 1,
         ingredients = pendingIngredients
     }
@@ -184,7 +185,7 @@ function confirmAndSaveRecipe()
     table.insert(recipes, newRecipe)
     saveRecipes()
 
-    if pendingDevice == "TURTLE" then
+    if pendingDeviceType == "TURTLE" then
         requestTurtleCraft()
         sleep(0.5)
         requestTurtleClear()
@@ -224,11 +225,11 @@ function renderUI()
         local w, h = t.getSize()
 
         if currentPage == "MAIN" then
-            drawText(t, 2, 1, "=== AUTO-FACTORY CONTROLLER v19 ===", colors.yellow, colors.black)
+            drawText(t, 2, 1, "=== AUTO-FACTORY CONTROLLER v20 ===", colors.yellow, colors.black)
             drawText(t, w - 12, 1, currentMotorSpeed .. " RPM", colors.lime, colors.black)
 
             if #recipes == 0 then
-                drawText(t, 2, 3, "No recipes registered. Click [+RECIPE] to add.", colors.red, colors.black)
+                drawText(t, 2, 3, "No recipes registered. Click [+RECIPE] to scan.", colors.red, colors.black)
             else
                 for i, r in ipairs(recipes) do
                     if i <= 5 then
@@ -244,7 +245,7 @@ function renderUI()
                 end
             end
 
-            -- Нижняя панель количества и мотора
+            -- Панель количества и скорости мотора
             drawBox(t, 2, h - 5, w - 4, 3, colors.gray)
             
             drawBox(t, 3, h - 4, 3, 1, colors.red)
@@ -256,18 +257,18 @@ function renderUI()
             drawBox(t, 15, h - 4, 3, 1, colors.green)
             drawText(t, 16, h - 4, "+", colors.white, colors.green)
 
-            drawBox(t, 19, h - 4, 5, 1, colors.orange)
-            drawText(t, 20, h - 4, "+10", colors.white, colors.orange)
+            -- Кнопки скоростей мотора
+            drawBox(t, 19, h - 4, 5, 1, colors.cyan)
+            drawText(t, 20, h - 4, "64", colors.black, colors.cyan)
 
-            -- Кнопки RPM мотора
-            drawBox(t, 25, h - 4, 7, 1, colors.cyan)
-            drawText(t, 26, h - 4, "128RPM", colors.black, colors.cyan)
+            drawBox(t, 25, h - 4, 5, 1, colors.blue)
+            drawText(t, 26, h - 4, "128", colors.white, colors.blue)
 
-            drawBox(t, 33, h - 4, 7, 1, colors.purple)
-            drawText(t, 34, h - 4, "256RPM", colors.white, colors.purple)
+            drawBox(t, 31, h - 4, 5, 1, colors.purple)
+            drawText(t, 32, h - 4, "256", colors.white, colors.purple)
 
-            drawBox(t, 41, h - 4, 7, 1, colors.lime)
-            drawText(t, 42, h - 4, "[CRAFT]", colors.black, colors.lime)
+            drawBox(t, 38, h - 4, 9, 1, colors.lime)
+            drawText(t, 39, h - 4, "[CRAFT]", colors.black, colors.lime)
 
             drawBox(t, 49, h - 4, 7, 1, colors.red)
             drawText(t, 50, h - 4, "[DEL]", colors.white, colors.red)
@@ -280,28 +281,20 @@ function renderUI()
             drawText(t, 20, btnY, "[ REFRESH ]", colors.white, colors.blue)
 
         elseif currentPage == "RECORD" then
-            drawText(t, 2, 1, "=== SELECT RECIPE DEVICE ===", colors.yellow, colors.black)
-            drawText(t, 2, 3, "Select target machine for recipe scan:", colors.white, colors.black)
-
-            drawBox(t, 4, 5, 12, 1, colors.blue)
-            drawText(t, 6, 5, "TURTLE", colors.white, colors.blue)
-
-            drawBox(t, 18, 5, 12, 1, colors.orange)
-            drawText(t, 19, 5, "DEPLOYER", colors.white, colors.orange)
-
-            drawBox(t, 4, 7, 12, 1, colors.purple)
-            drawText(t, 8, 7, "PRESS", colors.white, colors.purple)
-
-            drawBox(t, 18, 7, 12, 1, colors.green)
-            drawText(t, 22, 7, "MIXER", colors.black, colors.green)
+            drawText(t, 2, 1, "=== AUTOMATIC RECIPE SCAN ===", colors.yellow, colors.black)
+            drawText(t, 2, 3, "Place ingredients on ANY machine (Turtle, Press, Hand).", colors.white, colors.black)
+            drawText(t, 2, 4, "Click [ SCAN NOW ] to detect automatically.", colors.yellow, colors.black)
 
             local btnY = h - 1
+            drawBox(t, 2, btnY, 14, 1, colors.green)
+            drawText(t, 3, btnY, "[ SCAN NOW ]", colors.black, colors.green)
+
             drawBox(t, 18, btnY, 14, 1, colors.red)
             drawText(t, 20, btnY, "[ CANCEL ]", colors.white, colors.red)
 
         elseif currentPage == "CONFIRM" then
             drawText(t, 2, 1, "=== CONFIRM RECIPE ===", colors.yellow, colors.black)
-            drawText(t, 2, 3, "Machine: " .. pendingDevice, colors.cyan, colors.black)
+            drawText(t, 2, 3, "Detected Machine: " .. pendingDeviceType, colors.cyan, colors.black)
 
             for i, ing in ipairs(pendingIngredients) do
                 if i <= 5 then
@@ -348,17 +341,17 @@ while true do
                 elseif x >= 15 and x <= 17 then
                     orderAmount = orderAmount + 1
                     renderUI()
+                -- Переключение скоростей мотора
                 elseif x >= 19 and x <= 23 then
-                    orderAmount = orderAmount + 10
+                    setMotorSpeed(64)
                     renderUI()
-                elseif x >= 25 and x <= 31 then
+                elseif x >= 25 and x <= 29 then
                     setMotorSpeed(128)
                     renderUI()
-                elseif x >= 33 and x <= 39 then
+                elseif x >= 31 and x <= 35 then
                     setMotorSpeed(256)
                     renderUI()
-                elseif x >= 41 and x <= 47 and #recipes > 0 then
-                    -- Запуск выбранного рецепта
+                elseif x >= 38 and x <= 46 and #recipes > 0 then
                     setMotorSpeed(currentMotorSpeed)
                     if recipes[selectedRecipeIdx].device == "TURTLE" then
                         requestTurtleCraft()
@@ -379,23 +372,22 @@ while true do
             end
 
         elseif currentPage == "RECORD" then
-            if y == 5 then
-                if x >= 4 and x <= 15 then startPreviewScan("TURTLE") renderUI()
-                elseif x >= 18 and x <= 30 then startPreviewScan("DEPLOYER") renderUI() end
-            elseif y == 7 then
-                if x >= 4 and x <= 15 then startPreviewScan("PRESS") renderUI()
-                elseif x >= 18 and x <= 30 then startPreviewScan("MIXER") renderUI() end
-            elseif y >= h - 1 and x >= 18 and x <= 32 then
-                currentPage = "MAIN"
-                renderUI()
+            if y >= h - 1 then
+                if x >= 2 and x <= 16 then
+                    startAutoScanAll()
+                    renderUI()
+                elseif x >= 18 and x <= 32 then
+                    currentPage = "MAIN"
+                    renderUI()
+                end
             end
 
         elseif currentPage == "CONFIRM" then
             if y >= h - 1 then
-                if x >= 2 and x <= 20 then
+                if x >= 2 and x <= 19 then
                     confirmAndSaveRecipe()
                     renderUI()
-                elseif x >= 22 and x <= 36 then
+                elseif x >= 22 and x <= 35 then
                     pendingIngredients = {}
                     currentPage = "MAIN"
                     renderUI()
