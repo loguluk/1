@@ -1,5 +1,5 @@
--- Master Factory Controller v20.0
--- Fixed Line 115/119 nil-errors, Auto Device Detection & Motor Speed Buttons
+-- Master Factory Controller v21.0
+-- Step-by-Step Recipe Creation: Select RPM First -> Show SCAN NOW Button -> Save
 
 local RECIPE_FILE = "recipes.json"
 
@@ -37,14 +37,14 @@ local devices = {
 }
 
 local recipes = {}
-local currentPage = "MAIN" -- "MAIN", "RECORD", "CONFIRM"
+local currentPage = "MAIN" -- "MAIN", "SET_RPM", "CONFIRM"
 local selectedRecipeIdx = 1
 local orderAmount = 1
 local currentMotorSpeed = 256
 
 local pendingIngredients = {}
 local pendingDeviceType = "TURTLE"
-local detectedOutputItem = "Unknown"
+local pendingRpm = nil
 
 ----------------------------------------------------
 -- Сохранение и Загрузка
@@ -66,7 +66,7 @@ end
 loadRecipes()
 
 ----------------------------------------------------
--- Управление Мотором (electric_motor_5)
+-- Управление Мотором
 ----------------------------------------------------
 function setMotorSpeed(speed)
     currentMotorSpeed = speed
@@ -74,7 +74,7 @@ function setMotorSpeed(speed)
         local ok, m = pcall(peripheral.wrap, devices.motor)
         if ok and m and m.setSpeed then
             pcall(m.setSpeed, speed)
-            print("Motor 5 RPM updated to: " .. speed)
+            print("Motor RPM set to: " .. speed)
         end
     end
 end
@@ -101,7 +101,7 @@ function requestTurtleClear()
 end
 
 ----------------------------------------------------
--- Безопасный скан периферии Create (Без ошибок nil)
+-- Безопасный скан периферии Create
 ----------------------------------------------------
 function safeGetDeviceItem(deviceName)
     if not peripheral.isPresent(deviceName) then return nil end
@@ -124,7 +124,7 @@ function safeGetDeviceItem(deviceName)
 end
 
 ----------------------------------------------------
--- АВТОМАТИЧЕСКОЕ СКАНИРОВАНИЕ ВСЕХ МЕХАНИЗМОВ
+-- АВТОМАТИЧЕСКИЙ СКАН ПОСЛЕ ВЫБОРА СКОРОСТИ
 ----------------------------------------------------
 function startAutoScanAll()
     pendingIngredients = {}
@@ -153,7 +153,7 @@ function startAutoScanAll()
                 pendingDeviceType = "PRESS"
                 table.insert(pendingIngredients, { role = "press_depot", name = pressItem.name, count = pressItem.count })
             else
-                -- 4. Сканируем Чашу Миксера
+                -- 4. Сканируем Чашу
                 local mixerItem = safeGetDeviceItem(devices.basinMixer) or safeGetDeviceItem(devices.basinPress)
                 if mixerItem then
                     pendingDeviceType = "MIXER"
@@ -164,7 +164,7 @@ function startAutoScanAll()
     end
 
     if #pendingIngredients == 0 then
-        print("No items found on any machine!")
+        print("No items detected on any machine!")
         return false
     end
 
@@ -177,6 +177,7 @@ function confirmAndSaveRecipe()
     local newRecipe = {
         name = "Recipe #" .. (#recipes + 1),
         device = pendingDeviceType,
+        rpm = pendingRpm or currentMotorSpeed,
         output = mainName,
         yield = 1,
         ingredients = pendingIngredients
@@ -192,6 +193,7 @@ function confirmAndSaveRecipe()
     end
 
     pendingIngredients = {}
+    pendingRpm = nil
     currentPage = "MAIN"
 end
 
@@ -225,11 +227,11 @@ function renderUI()
         local w, h = t.getSize()
 
         if currentPage == "MAIN" then
-            drawText(t, 2, 1, "=== AUTO-FACTORY CONTROLLER v20 ===", colors.yellow, colors.black)
+            drawText(t, 2, 1, "=== AUTO-FACTORY CONTROLLER v21 ===", colors.yellow, colors.black)
             drawText(t, w - 12, 1, currentMotorSpeed .. " RPM", colors.lime, colors.black)
 
             if #recipes == 0 then
-                drawText(t, 2, 3, "No recipes registered. Click [+RECIPE] to scan.", colors.red, colors.black)
+                drawText(t, 2, 3, "No recipes registered. Click [+RECIPE] to add.", colors.red, colors.black)
             else
                 for i, r in ipairs(recipes) do
                     if i <= 5 then
@@ -237,7 +239,7 @@ function renderUI()
                         local prefix = isSel and "> " or "  "
                         local bgCol = isSel and colors.gray or colors.black
                         local fgCol = isSel and colors.white or colors.cyan
-                        local devTag = " [" .. (r.device or "TURTLE") .. "]"
+                        local devTag = " [" .. (r.device or "TURTLE") .. " - " .. (r.rpm or 256) .. "RPM]"
                         
                         drawBox(t, 2, 2 + i, w - 4, 1, bgCol)
                         drawText(t, 2, 2 + i, prefix .. i .. ". " .. (r.output or "Item") .. devTag, fgCol, bgCol)
@@ -245,7 +247,7 @@ function renderUI()
                 end
             end
 
-            -- Панель количества и скорости мотора
+            -- Нижняя панель количества
             drawBox(t, 2, h - 5, w - 4, 3, colors.gray)
             
             drawBox(t, 3, h - 4, 3, 1, colors.red)
@@ -256,16 +258,6 @@ function renderUI()
 
             drawBox(t, 15, h - 4, 3, 1, colors.green)
             drawText(t, 16, h - 4, "+", colors.white, colors.green)
-
-            -- Кнопки скоростей мотора
-            drawBox(t, 19, h - 4, 5, 1, colors.cyan)
-            drawText(t, 20, h - 4, "64", colors.black, colors.cyan)
-
-            drawBox(t, 25, h - 4, 5, 1, colors.blue)
-            drawText(t, 26, h - 4, "128", colors.white, colors.blue)
-
-            drawBox(t, 31, h - 4, 5, 1, colors.purple)
-            drawText(t, 32, h - 4, "256", colors.white, colors.purple)
 
             drawBox(t, 38, h - 4, 9, 1, colors.lime)
             drawText(t, 39, h - 4, "[CRAFT]", colors.black, colors.lime)
@@ -280,21 +272,38 @@ function renderUI()
             drawBox(t, 18, btnY, 14, 1, colors.blue)
             drawText(t, 20, btnY, "[ REFRESH ]", colors.white, colors.blue)
 
-        elseif currentPage == "RECORD" then
-            drawText(t, 2, 1, "=== AUTOMATIC RECIPE SCAN ===", colors.yellow, colors.black)
-            drawText(t, 2, 3, "Place ingredients on ANY machine (Turtle, Press, Hand).", colors.white, colors.black)
-            drawText(t, 2, 4, "Click [ SCAN NOW ] to detect automatically.", colors.yellow, colors.black)
+        elseif currentPage == "SET_RPM" then
+            drawText(t, 2, 1, "=== RECIPE SETUP: SELECT MOTOR RPM ===", colors.yellow, colors.black)
+            drawText(t, 2, 3, "Select working motor speed for this recipe:", colors.white, colors.black)
+
+            -- Кнопки выбора RPM
+            local rpm64Col = (pendingRpm == 64) and colors.lime or colors.cyan
+            drawBox(t, 4, 5, 10, 1, rpm64Col)
+            drawText(t, 6, 5, "64 RPM", colors.black, rpm64Col)
+
+            local rpm128Col = (pendingRpm == 128) and colors.lime or colors.blue
+            drawBox(t, 16, 5, 10, 1, rpm128Col)
+            drawText(t, 17, 5, "128 RPM", colors.white, rpm128Col)
+
+            local rpm256Col = (pendingRpm == 256) and colors.lime or colors.purple
+            drawBox(t, 28, 5, 10, 1, rpm256Col)
+            drawText(t, 29, 5, "256 RPM", colors.white, rpm256Col)
+
+            -- Если скорость выбрана, отображаем зеленую кнопку [ SCAN NOW ]
+            if pendingRpm then
+                drawBox(t, 4, 8, 16, 1, colors.green)
+                drawText(t, 6, 8, "[ SCAN NOW ]", colors.black, colors.green)
+            else
+                drawText(t, 4, 8, "Select RPM above to continue...", colors.gray, colors.black)
+            end
 
             local btnY = h - 1
-            drawBox(t, 2, btnY, 14, 1, colors.green)
-            drawText(t, 3, btnY, "[ SCAN NOW ]", colors.black, colors.green)
-
-            drawBox(t, 18, btnY, 14, 1, colors.red)
-            drawText(t, 20, btnY, "[ CANCEL ]", colors.white, colors.red)
+            drawBox(t, 2, btnY, 14, 1, colors.red)
+            drawText(t, 4, btnY, "[ CANCEL ]", colors.white, colors.red)
 
         elseif currentPage == "CONFIRM" then
             drawText(t, 2, 1, "=== CONFIRM RECIPE ===", colors.yellow, colors.black)
-            drawText(t, 2, 3, "Detected Machine: " .. pendingDeviceType, colors.cyan, colors.black)
+            drawText(t, 2, 3, "Machine: " .. pendingDeviceType .. " | Speed: " .. (pendingRpm or 256) .. " RPM", colors.cyan, colors.black)
 
             for i, ing in ipairs(pendingIngredients) do
                 if i <= 5 then
@@ -341,20 +350,13 @@ while true do
                 elseif x >= 15 and x <= 17 then
                     orderAmount = orderAmount + 1
                     renderUI()
-                -- Переключение скоростей мотора
-                elseif x >= 19 and x <= 23 then
-                    setMotorSpeed(64)
-                    renderUI()
-                elseif x >= 25 and x <= 29 then
-                    setMotorSpeed(128)
-                    renderUI()
-                elseif x >= 31 and x <= 35 then
-                    setMotorSpeed(256)
-                    renderUI()
                 elseif x >= 38 and x <= 46 and #recipes > 0 then
-                    setMotorSpeed(currentMotorSpeed)
-                    if recipes[selectedRecipeIdx].device == "TURTLE" then
-                        requestTurtleCraft()
+                    local selR = recipes[selectedRecipeIdx]
+                    if selR then
+                        setMotorSpeed(selR.rpm or 256)
+                        if selR.device == "TURTLE" then
+                            requestTurtleCraft()
+                        end
                     end
                     renderUI()
                 elseif x >= 49 and x <= 56 and #recipes > 0 then
@@ -366,20 +368,37 @@ while true do
 
             elseif y >= h - 1 then
                 if x >= 2 and x <= 16 then
-                    currentPage = "RECORD"
+                    -- Открываем настройку RPM для нового рецепта
+                    currentPage = "SET_RPM"
+                    pendingRpm = nil
                     renderUI()
                 end
             end
 
-        elseif currentPage == "RECORD" then
-            if y >= h - 1 then
-                if x >= 2 and x <= 16 then
-                    startAutoScanAll()
+        elseif currentPage == "SET_RPM" then
+            if y == 5 then
+                if x >= 4 and x <= 14 then
+                    pendingRpm = 64
+                    setMotorSpeed(64)
                     renderUI()
-                elseif x >= 18 and x <= 32 then
-                    currentPage = "MAIN"
+                elseif x >= 16 and x <= 26 then
+                    pendingRpm = 128
+                    setMotorSpeed(128)
+                    renderUI()
+                elseif x >= 28 and x <= 38 then
+                    pendingRpm = 256
+                    setMotorSpeed(256)
                     renderUI()
                 end
+            elseif y == 8 and pendingRpm then
+                if x >= 4 and x <= 20 then
+                    startAutoScanAll()
+                    renderUI()
+                end
+            elseif y >= h - 1 and x >= 2 and x <= 16 then
+                currentPage = "MAIN"
+                pendingRpm = nil
+                renderUI()
             end
 
         elseif currentPage == "CONFIRM" then
@@ -389,6 +408,7 @@ while true do
                     renderUI()
                 elseif x >= 22 and x <= 35 then
                     pendingIngredients = {}
+                    pendingRpm = nil
                     currentPage = "MAIN"
                     renderUI()
                 end
