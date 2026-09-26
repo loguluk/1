@@ -1,4 +1,4 @@
--- Автопоиск периферии (чтобы подхватил даже если изменится номер _0/_1)
+-- Автопоиск датчиков в сети
 local function getPeripheral(type_pattern)
     for _, name in ipairs(peripheral.getNames()) do
         if name:find(type_pattern) then
@@ -22,10 +22,24 @@ print("=== STARTING AUTOPILOT ===")
 print("Gyroscope: " .. (gyro_name or "NOT FOUND!"))
 print("Altimeter: " .. (alt_name or "NOT FOUND!"))
 
--- Базовый постоянный вектор вперёд
+-- 1. ИНИЦИАЛИЗАЦИЯ И ВКЛЮЧЕНИЕ ТЯГИ ДВИГАТЕЛЕЙ
+print("Enabling thrust on all engines...")
+for name, t in pairs(thrusters) do
+    if t then
+        -- Пробуем доступные методы включения тяги в зависимости от версий мода
+        if t.setThrust then t.setThrust(1.0) end
+        if t.setPower then t.setPower(1.0) end
+        if t.setThrottle then t.setThrottle(1.0) end
+        if t.setEnabled then t.setEnabled(true) end
+        print("Engine " .. name .. " ENABLED.")
+    else
+        print("WARNING: Engine " .. name .. " NOT CONNECTED!")
+    end
+end
+
+-- Параметры автопилота
 local forward_vector = 0.8
 local current_steer = 0.0
-
 local start_time = os.epoch("utc") / 1000
 
 while true do
@@ -39,33 +53,29 @@ while true do
     else
         -- После 10 секунд начинаем плавно накренять векторы вправо
         if current_steer < 0.3 then
-            current_steer = current_steer + 0.01 -- Скорость плавного разворота
+            current_steer = current_steer + 0.01 -- Скорость плавного поворачивания
         end
         print(string.format("[>10s] TURNING RIGHT | Steer: %.2f | Time: %.1fs", current_steer, elapsed))
     end
 
-    -- Чтение датчиков для выравнивания (если они активны)
+    -- Чтение датчиков для выравнивания
     local pitch_corr = 0
     local roll_corr = 0
 
     if gyro then
-        -- Автоматический выбор методов получения углов
         local pitch = (gyro.getPitch and gyro.getPitch()) or 0
         local roll = (gyro.getRoll and gyro.getRoll()) or 0
 
-        -- Простая компенсация наклона корпуса
+        -- Компенсация наклона корпуса
         pitch_corr = -pitch * 0.02
         roll_corr = -roll * 0.02
     end
 
-    -- Применяем векторы на моторы с учётом выравнивания и поворота
-    -- Левая пара моторов (FL, BL)
+    -- Направление сопел двигателей
     if thrusters.FL then thrusters.FL.setVector(current_steer + roll_corr, forward_vector + pitch_corr) end
     if thrusters.BL then thrusters.BL.setVector(current_steer + roll_corr, forward_vector + pitch_corr) end
-
-    -- Правая пара моторов (FR, BR)
     if thrusters.FR then thrusters.FR.setVector(current_steer - roll_corr, forward_vector - pitch_corr) end
     if thrusters.BR then thrusters.BR.setVector(current_steer - roll_corr, forward_vector - pitch_corr) end
 
-    sleep(0.1) -- Шаг цикла 100мс
+    sleep(0.1)
 end
