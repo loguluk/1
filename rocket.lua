@@ -1,15 +1,6 @@
--- Автопоиск датчиков в сети
-local function getPeripheral(type_pattern)
-    for _, name in ipairs(peripheral.getNames()) do
-        if name:find(type_pattern) then
-            return peripheral.wrap(name), name
-        end
-    end
-    return nil, nil
-end
-
-local gyro, gyro_name = getPeripheral("gimbal")
-local altimeter, alt_name = getPeripheral("altitude")
+-- Прямое подключение датчиков по сторонам компьютера и сетевых двигателей
+local gyro = peripheral.wrap("back") or peripheral.wrap("gimbal_sensor")
+local altimeter = peripheral.wrap("front") or peripheral.wrap("altitude_sensor")
 
 local thrusters = {
     FL = peripheral.wrap("liquid_vector_thruster_8"), -- Front-Left
@@ -19,14 +10,13 @@ local thrusters = {
 }
 
 print("=== STARTING AUTOPILOT ===")
-print("Gyroscope: " .. (gyro_name or "NOT FOUND!"))
-print("Altimeter: " .. (alt_name or "NOT FOUND!"))
+print("Gyroscope (back): " .. (gyro and "OK" or "NOT FOUND!"))
+print("Altimeter (front): " .. (altimeter and "OK" or "NOT FOUND!"))
 
--- 1. ИНИЦИАЛИЗАЦИЯ И ВКЛЮЧЕНИЕ ТЯГИ ДВИГАТЕЛЕЙ
+-- 1. Включение моторов и запуск тяги
 print("Enabling thrust on all engines...")
 for name, t in pairs(thrusters) do
     if t then
-        -- Пробуем доступные методы включения тяги в зависимости от версий мода
         if t.setThrust then t.setThrust(1.0) end
         if t.setPower then t.setPower(1.0) end
         if t.setThrottle then t.setThrottle(1.0) end
@@ -51,14 +41,14 @@ while true do
         current_steer = 0.0
         print(string.format("[0-10s] FLYING STRAIGHT | Time: %.1fs", elapsed))
     else
-        -- После 10 секунд начинаем плавно накренять векторы вправо
+        -- После 10 секунд начинаем плавно повертать вправо
         if current_steer < 0.3 then
-            current_steer = current_steer + 0.01 -- Скорость плавного поворачивания
+            current_steer = current_steer + 0.01 -- Плавность разворота
         end
         print(string.format("[>10s] TURNING RIGHT | Steer: %.2f | Time: %.1fs", current_steer, elapsed))
     end
 
-    -- Чтение датчиков для выравнивания
+    -- Чтение гироскопа для компенсации наклона
     local pitch_corr = 0
     local roll_corr = 0
 
@@ -66,12 +56,12 @@ while true do
         local pitch = (gyro.getPitch and gyro.getPitch()) or 0
         local roll = (gyro.getRoll and gyro.getRoll()) or 0
 
-        -- Компенсация наклона корпуса
+        -- Автоматическое выравнивание
         pitch_corr = -pitch * 0.02
         roll_corr = -roll * 0.02
     end
 
-    -- Направление сопел двигателей
+    -- Управление векторами сопел
     if thrusters.FL then thrusters.FL.setVector(current_steer + roll_corr, forward_vector + pitch_corr) end
     if thrusters.BL then thrusters.BL.setVector(current_steer + roll_corr, forward_vector + pitch_corr) end
     if thrusters.FR then thrusters.FR.setVector(current_steer - roll_corr, forward_vector - pitch_corr) end
