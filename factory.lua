@@ -1,5 +1,5 @@
--- Master Factory Controller v18.1
--- Safe Batch Delivery & Non-Dropping Storage Handler
+-- Master Factory Controller v19.0
+-- Full Create Integration: Deployer Hand Scan, Press/Mixer Depots & Motor RPM Control
 
 local RECIPE_FILE = "recipes.json"
 
@@ -32,23 +32,18 @@ local devices = {
     deployer   = "create:deployer_9",
     basinPress = "create:basin_10",
     basinMixer = "create:basin_11",
-    turtle     = "turtle_21"
+    turtle     = "turtle_21",
+    motor      = "electric_motor_5"
 }
-
-local motorName = nil
-for _, name in ipairs(peripheral.getNames()) do
-    if name:find("electric_motor") or peripheral.getType(name) == "create:electric_motor" then
-        motorName = name
-        break
-    end
-end
 
 local recipes = {}
 local currentPage = "MAIN" -- "MAIN", "RECORD", "CONFIRM"
 local selectedRecipeIdx = 1
 local orderAmount = 1
+local currentMotorSpeed = 256
 
 local pendingIngredients = {}
+local pendingDevice = "TURTLE"
 local detectedOutputItem = "Unknown"
 local detectedYieldCount = 1
 
@@ -72,14 +67,26 @@ end
 loadRecipes()
 
 ----------------------------------------------------
--- Сетевой обмен Rednet
+-- Управление Мотором (electric_motor_5)
+----------------------------------------------------
+function setMotorSpeed(speed)
+    currentMotorSpeed = speed
+    if peripheral.isPresent(devices.motor) then
+        local m = peripheral.wrap(devices.motor)
+        if m and m.setSpeed then
+            m.setSpeed(speed)
+            print("Motor speed set to: " .. speed .. " RPM")
+        end
+    end
+end
+
+----------------------------------------------------
+-- Сетевые вызовы и работа с инвентарями
 ----------------------------------------------------
 function requestTurtleScan()
     rednet.broadcast({ command = "SCAN" }, "factory_net")
     local senderId, reply = rednet.receive("factory_net", 2)
-    if reply and reply.grid then
-        return reply.grid
-    end
+    if reply and reply.grid then return reply.grid end
     return nil
 end
 
@@ -94,60 +101,70 @@ function requestTurtleClear()
     rednet.receive("factory_net", 3)
 end
 
-function setMotorSpeed(speed)
-    if motorName and peripheral.isPresent(motorName) then
-        local m = peripheral.wrap(motorName)
-        if m and m.setSpeed then m.setSpeed(speed) end
-    end
-end
+----------------------------------------------------
+-- Сканирование Руки (Deployer #9) и Депо/Чаш
+----------------------------------------------------
+function scanDeviceInventory(deviceName)
+    if not peripheral.isPresent(deviceName) then return nil end
+    local dev = peripheral.wrap(deviceName)
+    if not dev then return nil end
 
-----------------------------------------------------
--- Забор ингредиентов из силосов
-----------------------------------------------------
-function pullBatchFromSilosToTurtle(itemName, totalAmount, targetSlot)
-    local remaining = totalAmount
-    for _, siloName in ipairs(silos) do
-        if peripheral.isPresent(siloName) and peripheral.isPresent(devices.turtle) then
-            local silo = peripheral.wrap(siloName)
-            if silo and silo.list then
-                local items = silo.list()
-                for slot, item in pairs(items) do
-                    if item.name == itemName then
-                        local moved = silo.pushItems(devices.turtle, slot, remaining, targetSlot)
-                        remaining = remaining - moved
-                        print(string.format("Pulled %d x %s -> Turtle Slot %d", moved, itemName:gsub(".*:", ""), targetSlot))
-                        if remaining <= 0 then return true end
-                    end
-                end
-            end
+    local items = {}
+    if dev.getItemDetail then
+        -- Проверка руки Deployer или одиночного слота
+        local detail = dev.getItemDetail(1) or dev.getItemDetail()
+        if detail then
+            table.insert(items, { name = detail.name, count = detail.count, slot = 1 })
+        end
+    elseif dev.list then
+        local list = dev.list()
+        for slot, item in pairs(list) do
+            table.insert(items, { name = item.name, count = item.count, slot = slot })
         end
     end
-    return remaining < totalAmount
+    return items
 end
 
 ----------------------------------------------------
--- Запись и Сохранение Рецепта
+-- Сканирование и подготовка рецепта
 ----------------------------------------------------
-function startPreviewScan()
-    print("Scanning Turtle slots...")
-    local grid = requestTurtleScan()
-    
-    if not grid then
-        print("Error: Turtle 21 not responding via Rednet!")
-        return false
-    end
-
+function startPreviewScan(deviceType)
+    pendingDevice = deviceType or "TURTLE"
     pendingIngredients = {}
-    for slot, item in pairs(grid) do
-        table.insert(pendingIngredients, {
-            slot = slot,
-            name = item.name,
-            count = item.count
-        })
+
+    if pendingDevice == "TURTLE" then
+        local grid = requestTurtleScan()
+        if not grid then
+            print("Error: Turtle 21 not responding!")
+            return false
+        end
+        for slot, item in pairs(grid) do
+            table.insert(pendingIngredients, { slot = slot, name = item.name, count = item.count })
+        end
+
+    elseif pendingDevice == "DEPLOYER" then
+        -- Сканируем предмет в Руке (Deployer 9) + Предмет на Депо 16
+        local handItem = scanDeviceInventory(devices.deployer)
+        local depotItem = scanDeviceInventory(devices.depotArm)
+
+        if handItem and #handItem > 0 then
+            table.insert(pendingIngredients, { role = "hand", name = handItem[1].name, count = handItem[1].count })
+        end
+        if depotItem and #depotItem > 0 then
+            table.insert(pendingIngredients, { role = "depot", name = depotItem[1].name, count = depotItem[1].count })
+        end
+
+    elseif pendingDevice == "PRESS" then
+        local depotItem = scanDeviceInventory(devices.depotPress)
+        if depotItem then pendingIngredients = depotItem end
+
+    elseif pendingDevice == "MIXER" then
+        local basinItem = scanDeviceInventory(devices.basinMixer)
+        if basinItem then pendingIngredients = basinItem end
     end
 
     if #pendingIngredients == 0 then
-        print("Turtle grid is empty!")
+        print("No items detected in " .. pendingDevice .. "!")
         return false
     end
 
@@ -155,73 +172,26 @@ function startPreviewScan()
     return true
 end
 
-function confirmAndExecuteCraft()
-    print("Executing test craft & checking result...")
-    setMotorSpeed(256)
-    requestTurtleCraft()
-    sleep(0.5)
-
-    local afterGrid = requestTurtleScan()
-    detectedYieldCount = 1
-    detectedOutputItem = "Crafted_Result"
-
-    if afterGrid then
-        for slot, item in pairs(afterGrid) do
-            if item and item.count > 0 then
-                detectedOutputItem = item.name:gsub(".*:", "")
-                detectedYieldCount = item.count
-                break
-            end
-        end
-    end
-
+function confirmAndSaveRecipe()
     local newRecipe = {
         name = "Recipe #" .. (#recipes + 1),
-        output = detectedOutputItem,
-        yield = detectedYieldCount,
+        device = pendingDevice,
+        output = pendingIngredients[1] and pendingIngredients[1].name:gsub(".*:", "") or "Crafted_Item",
+        yield = 1,
         ingredients = pendingIngredients
     }
 
     table.insert(recipes, newRecipe)
     saveRecipes()
 
-    print("Safely storing output into available Silos...")
-    requestTurtleClear()
+    if pendingDevice == "TURTLE" then
+        requestTurtleCraft()
+        sleep(0.5)
+        requestTurtleClear()
+    end
 
     pendingIngredients = {}
     currentPage = "MAIN"
-end
-
-----------------------------------------------------
--- Цикл автокрафта
-----------------------------------------------------
-function runFullCraftCycle(recipe, targetAmount)
-    setMotorSpeed(256)
-    local yieldPerCraft = recipe.yield or 1
-    local totalCraftsNeeded = math.ceil(targetAmount / yieldPerCraft)
-
-    print(string.format("Starting Craft: %d x %s", targetAmount, recipe.output or "Item"))
-
-    requestTurtleClear()
-
-    if recipe.ingredients then
-        for _, ing in ipairs(recipe.ingredients) do
-            local batchNeeded = ing.count * totalCraftsNeeded
-            pullBatchFromSilosToTurtle(ing.name, batchNeeded, ing.slot)
-        end
-    end
-
-    sleep(0.2)
-
-    print("Executing craft...")
-    requestTurtleCraft()
-
-    sleep(0.2)
-
-    print("Safely returning output to free Silos...")
-    requestTurtleClear()
-
-    print("Auto-Craft Completed Successfully!")
 end
 
 ----------------------------------------------------
@@ -254,7 +224,8 @@ function renderUI()
         local w, h = t.getSize()
 
         if currentPage == "MAIN" then
-            drawText(t, 2, 1, "=== AUTO-FACTORY CONTROLLER ===", colors.yellow, colors.black)
+            drawText(t, 2, 1, "=== AUTO-FACTORY CONTROLLER v19 ===", colors.yellow, colors.black)
+            drawText(t, w - 12, 1, currentMotorSpeed .. " RPM", colors.lime, colors.black)
 
             if #recipes == 0 then
                 drawText(t, 2, 3, "No recipes registered. Click [+RECIPE] to add.", colors.red, colors.black)
@@ -265,23 +236,15 @@ function renderUI()
                         local prefix = isSel and "> " or "  "
                         local bgCol = isSel and colors.gray or colors.black
                         local fgCol = isSel and colors.white or colors.cyan
-                        local yieldStr = (r.yield and r.yield > 1) and (" (x" .. r.yield .. ")") or ""
+                        local devTag = " [" .. (r.device or "TURTLE") .. "]"
                         
                         drawBox(t, 2, 2 + i, w - 4, 1, bgCol)
-                        drawText(t, 2, 2 + i, prefix .. i .. ". " .. (r.output or "Item") .. yieldStr, fgCol, bgCol)
+                        drawText(t, 2, 2 + i, prefix .. i .. ". " .. (r.output or "Item") .. devTag, fgCol, bgCol)
                     end
-                end
-
-                local selR = recipes[selectedRecipeIdx]
-                if selR and selR.ingredients then
-                    local ingText = "Inputs: "
-                    for _, ing in ipairs(selR.ingredients) do
-                        ingText = ingText .. ing.count .. "x " .. ing.name:gsub(".*:", "") .. " "
-                    end
-                    drawText(t, 2, 8, ingText:sub(1, w - 4), colors.lightGray, colors.black)
                 end
             end
 
+            -- Нижняя панель количества и мотора
             drawBox(t, 2, h - 5, w - 4, 3, colors.gray)
             
             drawBox(t, 3, h - 4, 3, 1, colors.red)
@@ -296,14 +259,15 @@ function renderUI()
             drawBox(t, 19, h - 4, 5, 1, colors.orange)
             drawText(t, 20, h - 4, "+10", colors.white, colors.orange)
 
-            drawBox(t, 25, h - 4, 5, 1, colors.purple)
-            drawText(t, 26, h - 4, "+30", colors.white, colors.purple)
+            -- Кнопки RPM мотора
+            drawBox(t, 25, h - 4, 7, 1, colors.cyan)
+            drawText(t, 26, h - 4, "128RPM", colors.black, colors.cyan)
 
-            drawBox(t, 31, h - 4, 7, 1, colors.blue)
-            drawText(t, 32, h - 4, "[STK]", colors.white, colors.blue)
+            drawBox(t, 33, h - 4, 7, 1, colors.purple)
+            drawText(t, 34, h - 4, "256RPM", colors.white, colors.purple)
 
-            drawBox(t, 39, h - 4, 9, 1, colors.lime)
-            drawText(t, 40, h - 4, "[CRAFT]", colors.black, colors.lime)
+            drawBox(t, 41, h - 4, 7, 1, colors.lime)
+            drawText(t, 42, h - 4, "[CRAFT]", colors.black, colors.lime)
 
             drawBox(t, 49, h - 4, 7, 1, colors.red)
             drawText(t, 50, h - 4, "[DEL]", colors.white, colors.red)
@@ -316,35 +280,42 @@ function renderUI()
             drawText(t, 20, btnY, "[ REFRESH ]", colors.white, colors.blue)
 
         elseif currentPage == "RECORD" then
-            drawText(t, 2, 1, "=== RECORDER MODE ===", colors.red, colors.black)
-            drawText(t, 2, 3, "1. Place ingredients in Turtle 21 slots.", colors.yellow, colors.black)
-            drawText(t, 2, 4, "2. Click [ SCAN NOW ] to preview ingredients.", colors.white, colors.black)
+            drawText(t, 2, 1, "=== SELECT RECIPE DEVICE ===", colors.yellow, colors.black)
+            drawText(t, 2, 3, "Select target machine for recipe scan:", colors.white, colors.black)
+
+            drawBox(t, 4, 5, 12, 1, colors.blue)
+            drawText(t, 6, 5, "TURTLE", colors.white, colors.blue)
+
+            drawBox(t, 18, 5, 12, 1, colors.orange)
+            drawText(t, 19, 5, "DEPLOYER", colors.white, colors.orange)
+
+            drawBox(t, 4, 7, 12, 1, colors.purple)
+            drawText(t, 8, 7, "PRESS", colors.white, colors.purple)
+
+            drawBox(t, 18, 7, 12, 1, colors.green)
+            drawText(t, 22, 7, "MIXER", colors.black, colors.green)
 
             local btnY = h - 1
-            drawBox(t, 2, btnY, 14, 1, colors.green)
-            drawText(t, 3, btnY, "[ SCAN NOW ]", colors.black, colors.green)
-
             drawBox(t, 18, btnY, 14, 1, colors.red)
             drawText(t, 20, btnY, "[ CANCEL ]", colors.white, colors.red)
 
         elseif currentPage == "CONFIRM" then
-            drawText(t, 2, 1, "=== CONFIRM INGREDIENTS ===", colors.yellow, colors.black)
-            drawText(t, 2, 3, "Detected Items in Slots:", colors.white, colors.black)
+            drawText(t, 2, 1, "=== CONFIRM RECIPE ===", colors.yellow, colors.black)
+            drawText(t, 2, 3, "Machine: " .. pendingDevice, colors.cyan, colors.black)
 
             for i, ing in ipairs(pendingIngredients) do
                 if i <= 5 then
-                    drawText(t, 4, 3 + i, string.format("Slot %d: %dx %s", ing.slot, ing.count, ing.name:gsub(".*:", "")), colors.lime, colors.black)
+                    local label = ing.role and (" Role " .. ing.role .. ": ") or (" Slot " .. (ing.slot or i) .. ": ")
+                    drawText(t, 4, 3 + i, label .. ing.count .. "x " .. ing.name:gsub(".*:", ""), colors.lime, colors.black)
                 end
             end
 
-            drawText(t, 2, 10, "Click START CRAFT to execute test craft & save.", colors.yellow, colors.black)
-
             local btnY = h - 1
-            drawBox(t, 2, btnY, 22, 1, colors.green)
-            drawText(t, 3, btnY, "[ START CRAFT & SAVE ]", colors.black, colors.green)
+            drawBox(t, 2, btnY, 18, 1, colors.green)
+            drawText(t, 4, btnY, "[ SAVE RECIPE ]", colors.black, colors.green)
 
-            drawBox(t, 26, btnY, 14, 1, colors.red)
-            drawText(t, 28, btnY, "[ CANCEL ]", colors.white, colors.red)
+            drawBox(t, 22, btnY, 14, 1, colors.red)
+            drawText(t, 24, btnY, "[ CANCEL ]", colors.white, colors.red)
         end
     end
 end
@@ -380,17 +351,18 @@ while true do
                 elseif x >= 19 and x <= 23 then
                     orderAmount = orderAmount + 10
                     renderUI()
-                elseif x >= 25 and x <= 29 then
-                    orderAmount = orderAmount + 30
+                elseif x >= 25 and x <= 31 then
+                    setMotorSpeed(128)
                     renderUI()
-                elseif x >= 31 and x <= 37 then
-                    orderAmount = 64
+                elseif x >= 33 and x <= 39 then
+                    setMotorSpeed(256)
                     renderUI()
-                elseif x >= 7 and x <= 13 then
-                    orderAmount = 1
-                    renderUI()
-                elseif x >= 39 and x <= 47 and #recipes > 0 then
-                    runFullCraftCycle(recipes[selectedRecipeIdx], orderAmount)
+                elseif x >= 41 and x <= 47 and #recipes > 0 then
+                    -- Запуск выбранного рецепта
+                    setMotorSpeed(currentMotorSpeed)
+                    if recipes[selectedRecipeIdx].device == "TURTLE" then
+                        requestTurtleCraft()
+                    end
                     renderUI()
                 elseif x >= 49 and x <= 56 and #recipes > 0 then
                     table.remove(recipes, selectedRecipeIdx)
@@ -402,30 +374,28 @@ while true do
             elseif y >= h - 1 then
                 if x >= 2 and x <= 16 then
                     currentPage = "RECORD"
-                    setMotorSpeed(0)
-                    renderUI()
-                elseif x >= 18 and x <= 32 then
                     renderUI()
                 end
             end
 
         elseif currentPage == "RECORD" then
-            if y >= h - 1 then
-                if x >= 2 and x <= 16 then
-                    startPreviewScan()
-                    renderUI()
-                elseif x >= 18 and x <= 32 then
-                    currentPage = "MAIN"
-                    renderUI()
-                end
+            if y == 5 then
+                if x >= 4 and x <= 15 then startPreviewScan("TURTLE") renderUI()
+                elseif x >= 18 and x <= 30 then startPreviewScan("DEPLOYER") renderUI() end
+            elseif y == 7 then
+                if x >= 4 and x <= 15 then startPreviewScan("PRESS") renderUI()
+                elseif x >= 18 and x <= 30 then startPreviewScan("MIXER") renderUI() end
+            elseif y >= h - 1 and x >= 18 and x <= 32 then
+                currentPage = "MAIN"
+                renderUI()
             end
 
         elseif currentPage == "CONFIRM" then
             if y >= h - 1 then
-                if x >= 2 and x <= 24 then
-                    confirmAndExecuteCraft()
+                if x >= 2 and x <= 20 then
+                    confirmAndSaveRecipe()
                     renderUI()
-                elseif x >= 26 and x <= 40 then
+                elseif x >= 22 and x <= 36 then
                     pendingIngredients = {}
                     currentPage = "MAIN"
                     renderUI()
