@@ -1,42 +1,125 @@
--- Turtle Crafting Agent v1.0
-rednet.open("right") -- или другая сторона, где стоит модем
+-- Turtle Client Agent v7.2 (turtle_21)
+-- Enhanced Crafting, Output DNA Auto-Store & Safe Silo Item Storage
 
-print("Turtle Crafting Agent started...")
+local modem = peripheral.find("modem")
+if modem then
+    rednet.open(peripheral.getName(modem))
+end
 
-while true do
-    local senderId, message, protocol = rednet.receive("factory_net")
-    
-    if type(message) == "table" then
-        if message.command == "SCAN" then
-            -- Отправка текущего содержимого инвентаря для сканирования рецепта
-            local grid = {}
-            for slot = 1, 16 do
-                local detail = turtle.getItemDetail(slot)
-                if detail then
-                    grid[slot] = { name = detail.name, count = detail.count }
+print("=== TURTLE 21 CLIENT ONLINE (v7.2) ===")
+
+local silos = {
+    "create_connected:item_silo_94",
+    "create_connected:item_silo_95",
+    "create_connected:item_silo_96",
+    "create_connected:item_silo_97",
+    "create_connected:item_silo_98",
+    "create_connected:item_silo_101",
+    "create_connected:item_silo_100",
+    "create_connected:item_silo_99"
+}
+
+function scanGrid()
+    local gridData = {}
+    for slot = 1, 16 do
+        local detail = turtle.getItemDetail(slot)
+        if detail then
+            gridData[slot] = {
+                name = detail.name,
+                count = detail.count
+            }
+        end
+    end
+    return gridData
+end
+
+-- Безопасная отправка предмета из конкретного слота в доступный Силос
+function safeStoreItem(slotIdx)
+    local item = turtle.getItemDetail(slotIdx)
+    if not item or item.count == 0 then return true end
+
+    -- Определение собственного сетевого имени
+    local myName = "turtle_21"
+    for _, name in ipairs(peripheral.getNames()) do
+        if peripheral.getType(name) == "turtle" then
+            myName = name
+            break
+        end
+    end
+
+    -- Перебор силосов и забор предмета
+    for _, siloName in ipairs(silos) do
+        if peripheral.isPresent(siloName) then
+            local ok, moved = pcall(peripheral.call, siloName, "pullItems", myName, slotIdx, item.count)
+            if ok and type(moved) == "number" and moved > 0 then
+                print(string.format("Stored %d x %s -> %s", moved, item.name:gsub(".*:", ""), siloName))
+                if turtle.getItemCount(slotIdx) == 0 then
+                    return true
                 end
             end
-            rednet.send(senderId, { status = "OK", grid = grid }, "factory_net")
+        end
+    end
 
+    print(string.format("Warning: All Silos Full for slot %d!", slotIdx))
+    return false
+end
+
+function safeClearAllSlots()
+    for i = 1, 16 do
+        if turtle.getItemCount(i) > 0 then
+            safeStoreItem(i)
+        end
+    end
+    turtle.select(1)
+end
+
+----------------------------------------------------
+-- Главный цикл обработки Rednet команд
+----------------------------------------------------
+while true do
+    local senderId, message, protocol = rednet.receive("factory_net")
+    if type(message) == "table" then
+
+        -- 1. Сканирование текущих предметов в инвентаре Черепашки
+        if message.command == "SCAN" then
+            local data = scanGrid()
+            rednet.send(senderId, { status = "OK", grid = data }, "factory_net")
+
+        -- 2. Запуск процесса Крафта
         elseif message.command == "CRAFT" then
-            local count = message.count or 1
-            print("Received craft request for " .. count .. " items.")
-            
-            for c = 1, count do
-                -- Выполняем стандартный верстачный крафт
+            local craftLimit = message.count or 1
+            local totalCrafted = 0
+            local lastError = nil
+
+            for c = 1, craftLimit do
+                turtle.select(1)
                 local success, err = turtle.craft()
+                
                 if success then
-                    -- По твоему условию: готовый результат выкладывается/выбирается в 1-й слот
-                    turtle.select(1)
-                    print("Craft successful! Output in slot 1.")
-                    -- Если снизу или сзади есть контейнер, сгружаем результат из 1 слота:
-                    turtle.dropDown(turtle.getItemCount(1))
+                    totalCrafted = totalCrafted + 1
+                    print(string.format("Craft #%d successful!", c))
+                    
+                    -- Автоматически сгружаем готовый результат из 1 слота в Силос
+                    safeStoreItem(1)
                 else
-                    print("Craft failed: " .. tostring(err))
+                    lastError = err or "Crafting failed or ingredients missing"
+                    print("Craft failed: " .. tostring(lastError))
                     break
                 end
             end
 
+            -- Очищаем оставшиеся побочные слоты, если крафт завершен
+            turtle.select(1)
+
+            if totalCrafted > 0 then
+                rednet.send(senderId, { status = "OK", crafted = totalCrafted }, "factory_net")
+            else
+                rednet.send(senderId, { status = "FAIL", err = lastError }, "factory_net")
+            end
+
+        -- 3. Полная очистка инвентаря Черепашки
+        elseif message.command == "CLEAR_ALL" then
+            safeClearAllSlots()
             rednet.send(senderId, { status = "OK" }, "factory_net")
         end
     end
