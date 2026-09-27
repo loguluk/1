@@ -108,7 +108,6 @@ while true do
                 end
             end
 
-            -- Очищаем оставшиеся побочные слоты, если крафт завершен
             turtle.select(1)
 
             if totalCrafted > 0 then
